@@ -1,3 +1,6 @@
 [submodule "cadmium_v2"]
 	path = cadmium_v2
 	url = https://github.com/SimulationEverywhere/cadmium_v2.git
+[submodule "third_party/devsmap_generator"]
+	path = third_party/devsmap_generator
+	url = https://github.com/HazelGriffith/DEVSMap_to_Cadmium_Generator.git
