@@ -1,11 +1,8 @@
 __pycache__/
 *.pyc
-pingpong
 
 # local secrets / API keys
 .env
 .env.*
 !.env.example
-fused_proposal.py
-trace.json
 devsmap/out/

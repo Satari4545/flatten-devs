@@ -1,0 +1,36 @@
+{
+  "fused_pingpong": {
+    "x": {},
+    "y": {
+      "send": "string"
+    },
+    "s": {
+      "holder": "string",
+      "sigma": "R"
+    },
+    "delta_int": {
+      "holder == \"A\"": {
+        "holder": "\"B\"",
+        "sigma": "0.1"
+      },
+      "otherwise": {
+        "holder": "\"A\"",
+        "sigma": "0.1"
+      }
+    },
+    "delta_ext": {
+      "otherwise": {}
+    },
+    "delta_con": {
+      "otherwise": {}
+    },
+    "lambda": {
+      "otherwise": {
+        "send": "\"ball\""
+      }
+    },
+    "ta": {
+      "otherwise": "sigma"
+    }
+  }
+}
