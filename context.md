@@ -254,3 +254,111 @@ are removed afterwards.
 - Models are data. LLM-written expressions reach the generated C++ only
   after `devsmap_check`'s whitelist parser accepts them.
 - Error messages name files, never local absolute paths.
+
+## Scaling plan
+
+Today the pipeline runs closed, flat models end to end. Each item below
+lists what it depends on; they are in dependency order.
+
+### 1 Keep the patch layer healthy
+
+Upstream P1-P3 to the generator so the patch layer shrinks to nothing.
+Until then, every submodule bump can break anchors; that fails loudly
+(`PatchError`), and the fix is to re-derive the patch against the new
+code, never to loosen the anchor count.
+
+### 2 Close the generator gaps
+
+The unpatched limits are in the generator-limits table above;
+devsmap_check keeps LLM proposals out of each, cadmium_api refuses the
+coupled forms, and SKILL.md's rules describe the subset left. What the
+next items need:
+
+- **EIC/EOC and coupled-model ports**, for open coupled models (item 3)
+  and any nested model (item 4).
+- **Init states per level.** The generator looks them up under the top
+  model only, so nested models need per-level init files synthesized
+  from `model["init"]` (or P3 taught to walk its instance paths).
+- Multi-branch `ta` and a model's own `delta_con` stay outside
+  SKILL.md's rules until the generator translates them.
+
+### 3 Open models: generated input scripts
+
+Depends on 2 (EIC, coupled ports) for coupled targets. Verification needs
+a stimulus; we generate input scripts and feed the identical script to the
+original and the proposal:
+
+- targeted cases from the model's ports and sets;
+- seeded random scripts (the seed is part of the run record);
+- edge timings: inputs exactly on internal event times (stresses the
+  default `delta_con`), bursts, and the empty script.
+
+Delivery: one Cadmium `IEStream` atomic per input port, wired to the model
+under test by a test coupled model. That is new driver-side C++ (today the
+driver only instantiates the generated top model), plus EIC for coupled
+targets.
+
+The verdict is always scoped: "verified against scripts S up to horizon
+H". No script, no verdict: fuse refuses an open model, or marks the output
+UNVERIFIED only if explicitly asked.
+
+### 4 Bigger models: fuse bottom-up
+
+Depends on 1, 2 and 3. Fusing a whole model in one LLM call dies by state
+explosion (the fused state space is the product of the components'), and
+every verification run recompiles and re-simulates the whole model.
+Instead, one sub-coupled model at a time, from the leaves:
+
+- Fuse the innermost coupled model and verify it in isolation under
+  scripts S. Its scripts can include the boundary inputs it received in
+  a run of the original full model, recorded at its EIC.
+- Replace it by its fused atomic (same ports: closure under coupling) and
+  move one level up.
+- Mandatory final end-to-end run: the root's fused atomic against the
+  ORIGINAL full model, under the same scripts. Per-level checks are
+  finite-script checks, so passing them does not prove the composition.
+
+**Observation set.** For nested fusion, a run is compared on the outputs
+at the model's EOC (the root's EOC outputs for the final run), or on a
+named set of observed ports. This replaces today's rule of comparing
+every atomic output, internal couplings included: once a sub-model is
+fused, its internal events no longer exist.
+
+The result is reported as verified against scripts S up to horizon H,
+never as proven equivalent.
+
+### 5 Stronger verification
+
+- **Float tolerance.** Today values and times are compared exactly (times
+  rounded to 10 decimals). Real-valued outputs need a per-instant
+  multiset comparison with a tolerance.
+- **State mapping.** The driver already logs state rows. Rebuild the
+  original's joint state at every event time by carrying forward each
+  component's last logged state plus its elapsed time, and check an
+  explicit abstraction function h (proposed with the fusion) from the
+  fused state to that joint state at every event time. This catches
+  proposals whose outputs agree by luck within the horizon.
+- **Second simulator.** A cross-check against e.g. adevs is the only
+  defense against bugs shared by reference and proposal (generator,
+  patches, driver, Cadmium), but it needs a second DEVSMap translator.
+  Not planned until one exists.
+
+### 6 Cost and nondeterminism
+
+- The prompt carries SKILL.md, the coupled model, the summary and the
+  shown trace, plus the last proposal on retries; it grows with model
+  size. `FUSE_MAX_ITERS` bounds the rounds.
+- LLM replies are nondeterministic. Record model name, prompt and reply
+  per run so an accepted fusion can be traced and a failure reproduced
+  (today stdout shows the model and the reply; the prompt is not kept
+  anywhere).
+- Every `simulate` call regenerates and recompiles (seconds per run).
+  The reference run takes several simulations (finding the window and
+  horizon) and is redone on every fuse run; there is no cache.
+
+### 7 Minimality (outside verification)
+
+Size is reported on accept (state variables, branches) and warned on, but
+it is not part of the verdict. A scoring of accepted fusions, e.g. to
+expose a proposal that merely concatenates the components' states, is a
+reporting feature on top of verification, not a criterion inside it.
