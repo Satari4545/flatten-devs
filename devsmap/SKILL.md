@@ -2,9 +2,9 @@
 
 How to write a DEVSMap atomic model (Govind, Cardenas & Wainer, "DEVSMAP:
 On the Path of Standardized DEVS Model Representation") that this
-project's loader (`devsmap.py`) accepts and the DEVSMap_to_Cadmium
-generator translates correctly. Anything outside these rules is rejected
-with an error naming the model, the function and the expression.
+project's checker (`devsmap_check.py`) accepts and the DEVSMap_to_Cadmium
+generator translates correctly. Breaking these rules gets the proposal
+rejected with an error saying where, or makes it fail to compile.
 
 ## Files
 
@@ -15,8 +15,7 @@ An atomic model named `<name>` is two files:
 - `<name>_init_state.json`: `{"init_states": {"<name>": {"<var>": "<value>"}}}`,
   setting every state variable and nothing else.
 
-No object repeats a key. The atomic file never sets initial state (there
-is no `"initial"` key).
+The atomic file never sets initial state (there is no `"initial"` key).
 
 ## Model body
 
@@ -87,21 +86,11 @@ replacement): write `"( sigma + 0.1 ) / 2.0"` and `"0.1 < sigma "`, not
 
 Names (the model, ports, state variables) are identifiers: letters,
 digits and `_`, not starting with a digit or `_`, without `__`, and not
-ending in `State` (the generator names each atomic's state struct
-`<model>State`). In addition:
+`e` or `inf`. In addition:
 
-- No C++ keyword, no all-uppercase name longer than one character
-  (macro style: `EOF`, `NULL`, `X2`; a single letter like `A` is fine),
-  and none of the reserved names
-  - `e`, `inf`, `state`, `id`, `initial_state`, `std`, `cadmium`,
-    `Port`, `Atomic`, `Coupled`, `Component`, `output`,
-    `internalTransition`, `externalTransition`, `confluentTransition`,
-    `timeAdvance`, `logState`, `addComponent`, `addCoupling`,
-    `addInPort`, `addOutPort` (used by the generated C++ and Cadmium),
-  - `main`, `GenModel`, `TraceLogger`, `TooManyEvents`,
-    `kTooManyEvents`, `wrapper`, `top` (used by the Cadmium backend and
-    its sim driver),
-  - `errno`, `stdin`, `stdout`, `stderr` (C macros).
+- Avoid C++ keywords and names the generated code uses (e.g. `Port`,
+  `output`, `state`, `main`, names ending in `State`): they do not
+  compile.
 - The model name, input ports, output ports and state variables are all
   distinct (no port in both `x` and `y`, no state variable named like a
   port).

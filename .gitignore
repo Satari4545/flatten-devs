@@ -8,3 +8,4 @@ pingpong
 !.env.example
 fused_proposal.py
 trace.json
+devsmap/out/
