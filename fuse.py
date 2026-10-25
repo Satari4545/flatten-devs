@@ -18,7 +18,6 @@ default 3).
 import json
 import os
 import re
-import sys
 import tempfile
 import time
 from typing import NamedTuple
@@ -426,14 +425,3 @@ def fuse(coupled_path, out_dir=OUT_DIR):
     print(f"fuse: no accepted model after {max_iters} attempts; "
           f"last reason: {reason}")
     return 1
-
-
-if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        sys.exit("usage: python fuse.py <name>_coupled.json")
-    # A console that cannot encode a character shows "?" instead of failing.
-    sys.stdout.reconfigure(errors="replace")
-    try:
-        sys.exit(fuse(sys.argv[1]))
-    except (ValueError, cadmium_api.CadmiumError, LLMError) as exc:
-        sys.exit(f"fuse: {exc}")
