@@ -111,12 +111,11 @@ Recode the reachable set as a minimal atomic model:
 
 - Give the explicit mapping: which reachable product states correspond
   to each of your fused states (the bisimulation relation).
-- Every component id must remain recoverable from the fused atomic --
-  e.g. a state variable ranging over the component ids (which component
-  is active / holds the token), or component-qualified state. Do NOT
-  produce an anonymous model (a bare timer, a bare counter) that erases
-  which component is active: that is a behavioral abstraction, not a
-  quotient of the paper's resultant.
+- Every component id must appear as its own state variable (or variable
+  group) in the fused atomic, recording that component's state directly.
+  Do NOT produce an anonymous model (a bare timer, a bare counter) that
+  erases which component is which: that is a behavioral abstraction, not
+  a quotient of the paper's resultant.
 - The fused atomic's `lambda` must make the origin visible in the trace:
   emit `"<component_id>:<value>"` (e.g. `"A:ball"`, `"P01:ball"`), never
   a bare value. The verifier folds the original's sender into the value
