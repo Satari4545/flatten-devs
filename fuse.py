@@ -123,12 +123,13 @@ Recode the reachable set as a minimal atomic model:
   the same way, so a proposal emitting bare values is rejected.
 - Merge only behaviorally-indistinguishable states, and justify each
   merge.
-- Prefer EXPLICIT per-component state over compressed encodings: a
-  reviewer must be able to see each component's state without inferring
-  it through an invariant. Compress (e.g. one holder variable instead of
-  one flag per component) only when the invariant is airtight and you
-  state it. Visibility beats brevity; a wrong compression is a silent
-  correctness bug, a redundant variable is just untidy.
+- Use one state variable per component, named by component id, recording
+  that component's state directly (e.g. `P01`, `P02`, each `"Ball"` or
+  `"NoBall"`). Do NOT compress multiple components' states into a single
+  variable (no holder/pointer/token variable): every component's state
+  must be visible in the state, not inferred through an invariant. If a
+  component has several aspects, use one variable per aspect per
+  component (`P01_phase`, `P01_count`, ...).
 
 Two layers, kept honest: Phase 1 is the paper (exact, usually large).
 Phase 2 is exact reduction by reachability. Phase 3 is *our* extension --
@@ -151,25 +152,29 @@ sigma = 0.1, Wait <=> sigma = inf; neither delta_ext reads `e` and no
 passive component can go imminent, so individual clocks are dropped.
 Two reachable states.
 
-Phase 3: mapping -- holder="A" <=> (A Send, B Wait); holder="B" <=>
-(A Wait, B Send). The fused atomic (plain text, not a code block):
+Phase 3: mapping -- one state variable per component: `A` is `"Ball"`
+exactly when component A is Send (otherwise `"NoBall"`), and likewise
+for `B`. No holder variable: each component's state is directly
+visible. The fused atomic (plain text, not a code block):
 
     {{"fused_pingpong": {{
       "x": {{}},
       "y": {{"send": "string"}},
-      "s": {{"holder": "string", "sigma": "R"}},
+      "s": {{"A": "string", "B": "string", "sigma": "R"}},
       "delta_int": {{
-        "holder == \"A\"": {{"holder": "\"B\"", "sigma": "0.1"}},
-        "otherwise": {{"holder": "\"A\"", "sigma": "0.1"}}}},
+        "A == \"Ball\"": {{"A": "\"NoBall\"", "B": "\"Ball\"",
+                           "sigma": "0.1"}},
+        "otherwise": {{"A": "\"Ball\"", "B": "\"NoBall\"",
+                       "sigma": "0.1"}}}},
       "delta_ext": {{"otherwise": {{}}}},
       "delta_con": {{"otherwise": {{}}}},
       "lambda": {{
-        "holder == \"A\"": {{"send": "\"A:ball\""}},
+        "A == \"Ball\"": {{"send": "\"A:ball\""}},
         "otherwise": {{"send": "\"B:ball\""}}}},
       "ta": {{"otherwise": "sigma"}}}}}}
 
-Init: {{"init_states": {{"fused_pingpong": {{"holder": "\"A\"",
-"sigma": "0.1"}}}}}}.
+Init: {{"init_states": {{"fused_pingpong": {{"A": "\"Ball\"",
+"B": "\"NoBall\"", "sigma": "0.1"}}}}}}.
 
 Note the "<id>:<value>" emission: the verifier checks *which* component
 emitted each output, so bare values are rejected. Your answer must still
