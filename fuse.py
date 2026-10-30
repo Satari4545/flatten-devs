@@ -64,6 +64,40 @@ component-qualified state. Do NOT produce an anonymous model (a bare
 timer, a bare counter) that erases which component is active: that is a
 behavioral abstraction, not the paper's resultant.
 
+## The paper's construction (your recipe)
+
+The closure paper builds the resultant atomic from the coupled model in
+six steps. Your fused model must realize this construction; any
+minimization must be a justified quotient of it, not a guess:
+
+1. **State.** The resultant's state is the product of the components'
+   states, each paired with its elapsed time (time since that
+   component's last transition). Account for every component's state and
+   elapsed time. Merging is allowed only where you argue, in the
+   invariants, that the merged-away detail never affects future behavior.
+2. **Time advance.** The resultant's time advance is the minimum, over
+   all components, of (time advance minus elapsed time). The components
+   attaining the minimum are *imminent*.
+3. **Output.** Every imminent component computes its output via its
+   output function -- all of them; Parallel DEVS has no select function.
+4. **Routing.** Outputs travel through the coupling table: internal
+   couplings into the recipients' input bags, external output couplings
+   out of the model, external input couplings into components from
+   outside.
+5. **Transition.** Each component updates by case: imminent *and*
+   receiving input -> its confluent transition; receiving but not
+   imminent -> its external transition (with its own elapsed time);
+   imminent but not receiving -> its internal transition; neither -> only
+   its elapsed time grows.
+6. **Repeat.** The clock advances to the next minimum and the cycle
+   continues from step 2.
+
+Two layers, kept honest: the paper gives this exact, identity-preserving
+construction -- it is usually large, and minimality is *our* extension,
+not the paper's. The verifier only checks the trace, so your invariants
+section must carry the justification this construction would otherwise
+give for free.
+
 The DEVSMap format you must follow is described below:
 ---
 {devsmap_spec}
