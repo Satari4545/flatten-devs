@@ -186,8 +186,8 @@ format is here; nothing checks it in a user model.
 ```
 git clone <repo-url> && cd <repo>
 git submodule update --init      # cadmium_v2 + the generator, NOT --recursive
-pip install -U google-genai      # only needed to call the LLM
-cp .env.example .env             # then set GEMINI_API_KEY in .env
+pip install -U google-genai      # Gemini only; for OpenAI: pip install -U openai
+cp .env.example .env             # set the selected provider's key/model
 python main.py --check           # needs g++, no API key
 ```
 
@@ -215,9 +215,13 @@ cp1252 console).
 
 | Variable | Default | Used by |
 |---|---|---|
-| `GEMINI_API_KEY` (or `GOOGLE_API_KEY`, `LLM_API_KEY`) | none | fuse |
+| `LLM_PROVIDER` | `gemini`; set `openai` to use the OpenAI Responses API | fuse |
+| `GEMINI_API_KEY` (or `GOOGLE_API_KEY`, `LLM_API_KEY`) | none; used only with Gemini | fuse |
 | `GEMINI_MODELS` (comma-separated) or `GEMINI_MODEL` | `gemini-3.8-flash` | fuse |
 | `GEMINI_RETRIES` | 3 per model | fuse |
+| `OPENAI_API_KEY` | none; required with OpenAI | fuse |
+| `OPENAI_MODELS` (comma-separated) or `OPENAI_MODEL` | `gpt-6-sol` (requested, unverified API ID) | fuse |
+| `OPENAI_RETRIES` | 3 per model | fuse |
 | `FUSE_MAX_ITERS` | 3 LLM rounds | fuse |
 | `CXX` | `g++` | backend |
 | `CADMIUM_INCLUDE` | `cadmium_v2/include` | backend |
@@ -225,7 +229,13 @@ cp1252 console).
 | `DEVS_GENERATOR_DIR` | `third_party/devsmap_generator` | backend |
 | `DEVS_SIM_TIMEOUT` | 60 s per simulation | backend |
 
-fuse also reads its variables from `.env` (the environment wins).
+fuse also reads its variables from `.env` (the environment wins). To use
+OpenAI, set `LLM_PROVIDER=openai` and `OPENAI_API_KEY` in `.env`; the
+requested default model ID is `gpt-6-sol`, which has not been verified in
+OpenAI's public model catalog. If the API rejects it, set `OPENAI_MODEL`
+to an ID available to your account (for example, the documented
+`gpt-5.4`). Gemini remains the default provider. API requests may incur
+charges, including retries and rejected proposals.
 
 Outputs: an accepted fusion goes to a new `devsmap/out/<name>-<random>/`
 (gitignored) as `<name>_atomic.json` + `<name>_init_state.json`; earlier

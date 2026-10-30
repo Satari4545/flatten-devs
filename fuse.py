@@ -2,17 +2,16 @@
 
     fuse(coupled_path, out_dir) -> 0 (accepted, files written) or 1
 
-The coupled model's Cadmium trace is the reference. Gemini proposes a fused
+The coupled model's Cadmium trace is the reference. An LLM proposes a fused
 atomic plus init state; each proposal is checked (devsmap_check), simulated
 and compared with the reference, and rejections are fed back to the LLM.
 Traces compare as (time, port, value) multisets. The LLM sees the first
 SHOWN_EVENTS events; comparison runs HIDDEN_FACTOR times longer, so replaying
 the shown events is not enough.
 
-Environment (also read from .env): GEMINI_API_KEY (or GOOGLE_API_KEY /
-LLM_API_KEY), GEMINI_MODELS (comma-separated fallbacks; GEMINI_MODEL for
-one), GEMINI_RETRIES (per model, default 3), FUSE_MAX_ITERS (LLM rounds,
-default 3).
+Environment (also read from .env): LLM_PROVIDER (gemini or openai), the
+selected provider's API key, model(s) and retries, and FUSE_MAX_ITERS
+(LLM rounds, default 3).
 """
 
 import json
@@ -214,24 +213,33 @@ def env_int(name, default):
 
 
 def llm_settings():
-    """(api key, models, retries per model) from the environment and .env;
-    an LLMError if they are unusable."""
+    """(provider, api key, models, retries per model) from .env/environment."""
     load_env_file()
-    key = (os.environ.get("GEMINI_API_KEY")
-           or os.environ.get("GOOGLE_API_KEY")
-           or os.environ.get("LLM_API_KEY"))
+    provider = os.environ.get("LLM_PROVIDER", "gemini").strip().lower()
+    if provider not in ("gemini", "openai"):
+        raise LLMError("LLM_PROVIDER must be 'gemini' or 'openai'")
+    if provider == "openai":
+        key = os.environ.get("OPENAI_API_KEY")
+        model_text = os.environ.get("OPENAI_MODELS") or os.environ.get(
+            "OPENAI_MODEL", "gpt-6-sol")
+        prefix = "OPENAI"
+    else:
+        key = (os.environ.get("GEMINI_API_KEY")
+               or os.environ.get("GOOGLE_API_KEY")
+               or os.environ.get("LLM_API_KEY"))
+        model_text = os.environ.get("GEMINI_MODELS") or os.environ.get(
+            "GEMINI_MODEL", "gemini-3.8-flash")
+        prefix = "GEMINI"
     if not key:
-        raise LLMError("set GEMINI_API_KEY first (e.g. in .env)")
-    model_text = os.environ.get("GEMINI_MODELS") or os.environ.get(
-        "GEMINI_MODEL", "gemini-3.8-flash")
+        raise LLMError(f"set {prefix}_API_KEY first (e.g. in .env)")
     models = [m.strip() for m in model_text.split(",") if m.strip()]
     if not models:
-        raise LLMError(f"no Gemini model in {model_text!r}")
+        raise LLMError(f"set {prefix}_MODEL to an available model ID")
     try:
-        retries = env_int("GEMINI_RETRIES", 3)
+        retries = env_int(f"{prefix}_RETRIES", 3)
     except ValueError as exc:
         raise LLMError(str(exc)) from None
-    return key, models, retries
+    return provider, key, models, retries
 
 
 def _event_text(event):
@@ -248,10 +256,42 @@ def _event_text(event):
     return ""
 
 
+def _call_openai(prompt, key, models, retries):
+    """Request plain text via the OpenAI Responses API."""
+    try:
+        from openai import OpenAI
+    except ImportError:
+        raise LLMError("install the OpenAI SDK first: "
+                       "pip install -U openai") from None
+    client = OpenAI(api_key=key, max_retries=0)
+    last_error = None
+    for model in models:
+        for attempt in range(1, retries + 1):
+            print(f"fuse: sending request to OpenAI model {model} "
+                  f"(attempt {attempt}/{retries})...")
+            try:
+                response = client.responses.create(model=model, input=prompt)
+                reply = response.output_text
+                if not isinstance(reply, str) or not reply.strip():
+                    raise RuntimeError("response contained no text output")
+            except Exception as exc:
+                last_error = f"{model}: {exc}"
+                print(f"fuse: OpenAI request failed: {exc}")
+                if attempt < retries:
+                    wait = 3 * attempt
+                    print(f"fuse: retrying in {wait}s...")
+                    time.sleep(wait)
+            else:
+                print(f"\nfuse: OpenAI request succeeded:\n{reply}")
+                return reply
+    raise LLMError(f"every OpenAI request failed; last: {last_error}")
+
+
 def call_llm(prompt):
-    """Send `prompt` to Gemini and return the reply, trying every model up
-    to its retries; LLMError if none answers."""
-    key, models, retries = llm_settings()
+    """Ask the selected provider, trying its configured models and retries."""
+    provider, key, models, retries = llm_settings()
+    if provider == "openai":
+        return _call_openai(prompt, key, models, retries)
     try:
         from google import genai
     except ImportError:
