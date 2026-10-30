@@ -43,8 +43,26 @@ You are given TWO compact views of the same DEVS model:
 2. The flattened summary: its components, initial state, couplings, and
 resultant semantics in a compact form.
 
-Your task: combine these views into a MINIMAL fused atomic DEVS model with
-the same output events as the original, expressed as DEVSMap documents.
+Your task: combine these views into a MINIMAL fused atomic DEVS model that
+realizes closure under coupling for the original, expressed as DEVSMap
+documents.
+
+Follow the papers exactly:
+- Zeigler, Kewley, Wainer (2025), "Closure under coupling"
+  (Computers 14(12), 514): a coupled model is defined over D, a set of
+  NAMED components, and the closure resultant's state is indexed by those
+  component names. Component identity is part of the construction, not an
+  annotation.
+- Govind, Cardenas, Wainer, "DEVSMap: On the Path of Standardized DEVS
+  Model Representation": components are listed as model name -> instance
+  ids; those ids are the D of the construction above.
+
+Concretely: every component id in the coupled model must remain
+recoverable from the fused atomic -- e.g. a state variable ranging over
+the component ids (which component is active / holds the token), or
+component-qualified state. Do NOT produce an anonymous model (a bare
+timer, a bare counter) that erases which component is active: that is a
+behavioral abstraction, not the paper's resultant.
 
 The DEVSMap format you must follow is described below:
 ---
@@ -56,15 +74,17 @@ Rules:
   <name>_init_state.json. Pick one model name and use it in both.
 - Reproduce every output event of the original's atomic components, also
   the ones that only travel along internal couplings. Events are
-  (time, port, value); which component sent an event is internal
-  structure, not part of the output. This is the coupled model's trace
-  in Cadmium until t = {window}:
+  (time, port, value); the fused model must also keep each event tied to
+  its component, so that every component id stays recoverable from the
+  fused state. This is the coupled model's trace in Cadmium until
+  t = {window}:
 {expected}
 - The verifier keeps comparing after t = {window}, so reproduce the
   behavior, not just the listed events.
 - Look for invariants in the state, such as correlated variables or values
   that are impossible or redundant, and represent them with fewer meaningful
-  state variables when possible.
+  state variables when possible. Merging state is allowed only if no
+  component id becomes unrecoverable.
 - First explain the invariant(s) you found in plain words, then give the
   atomic document in ONE ```json block and the init-state document in a
   second ```json block. No other code blocks.
