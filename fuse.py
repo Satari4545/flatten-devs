@@ -43,9 +43,9 @@ You are given TWO compact views of the same DEVS model:
 2. The flattened summary: its components, initial state, couplings, and
 resultant semantics in a compact form.
 
-Your task: combine these views into a MINIMAL fused atomic DEVS model that
-realizes closure under coupling for the original, expressed as DEVSMap
-documents.
+Your task: fuse the coupled model into a MINIMAL atomic DEVS model, in
+three phases. Reason step by step and write each phase before moving to
+the next.
 
 Follow the papers exactly:
 - Zeigler, Kewley, Wainer (2025), "Closure under coupling"
@@ -57,46 +57,66 @@ Follow the papers exactly:
   Model Representation": components are listed as model name -> instance
   ids; those ids are the D of the construction above.
 
-Concretely: every component id in the coupled model must remain
-recoverable from the fused atomic -- e.g. a state variable ranging over
-the component ids (which component is active / holds the token), or
-component-qualified state. Do NOT produce an anonymous model (a bare
-timer, a bare counter) that erases which component is active: that is a
-behavioral abstraction, not the paper's resultant.
+## Phase 1 -- the paper's construction (exact, no reduction)
 
-## The paper's construction (your recipe)
+Build the closure paper's resultant conceptually, in six steps:
 
-The closure paper builds the resultant atomic from the coupled model in
-six steps. Your fused model must realize this construction; any
-minimization must be a justified quotient of it, not a guess:
-
-1. **State.** The resultant's state is the product of the components'
-   states, each paired with its elapsed time (time since that
-   component's last transition). Account for every component's state and
-   elapsed time. Merging is allowed only where you argue, in the
-   invariants, that the merged-away detail never affects future behavior.
-2. **Time advance.** The resultant's time advance is the minimum, over
-   all components, of (time advance minus elapsed time). The components
-   attaining the minimum are *imminent*.
-3. **Output.** Every imminent component computes its output via its
-   output function -- all of them; Parallel DEVS has no select function.
+1. **State.** The product of the components' states, each paired with
+   its elapsed time (time since that component's last transition).
+2. **Time advance.** The minimum, over all components, of (time advance
+   minus elapsed time). Components attaining the minimum are *imminent*.
+3. **Output.** Every imminent component computes its output -- all of
+   them; Parallel DEVS has no select function.
 4. **Routing.** Outputs travel through the coupling table: internal
-   couplings into the recipients' input bags, external output couplings
-   out of the model, external input couplings into components from
-   outside.
+   couplings into recipients' input bags, external output couplings out
+   of the model, external input couplings into components from outside.
 5. **Transition.** Each component updates by case: imminent *and*
    receiving input -> its confluent transition; receiving but not
    imminent -> its external transition (with its own elapsed time);
    imminent but not receiving -> its internal transition; neither -> only
    its elapsed time grows.
-6. **Repeat.** The clock advances to the next minimum and the cycle
-   continues from step 2.
+6. **Repeat.** The clock advances to the next minimum; the cycle
+   continues.
 
-Two layers, kept honest: the paper gives this exact, identity-preserving
-construction -- it is usually large, and minimality is *our* extension,
-not the paper's. The verifier only checks the trace, so your invariants
-section must carry the justification this construction would otherwise
-give for free.
+For a large coupled model this product state is enormous -- that is
+expected, and it is exactly why Phase 2 exists. Do not minimize yet;
+understand the construction. (Reason about it; you do not need to list
+every product variable.)
+
+## Phase 2 -- what is reachable (exact, no approximation)
+
+From the given initial state, characterize the reachable set:
+
+- State the invariants: which combinations of component states and
+  elapsed times can actually occur. (Example: "exactly one component is
+  in Send; the others are in Wait.")
+- For each component, determine whether its elapsed time can ever affect
+  a future transition or output: does its delta_ext read `e`? Can it
+  become imminent while passive? If neither, its individual clock can be
+  discarded -- but say so explicitly, per component.
+- Discard everything unreachable. This step is exact: unreachable states
+  never occur, so removing them changes nothing about the behavior.
+
+## Phase 3 -- the minimal atomic (our extension: justify it)
+
+Recode the reachable set as a minimal atomic model:
+
+- Give the explicit mapping: which reachable product states correspond
+  to each of your fused states (the bisimulation relation).
+- Every component id must remain recoverable from the fused atomic --
+  e.g. a state variable ranging over the component ids (which component
+  is active / holds the token), or component-qualified state. Do NOT
+  produce an anonymous model (a bare timer, a bare counter) that erases
+  which component is active: that is a behavioral abstraction, not a
+  quotient of the paper's resultant.
+- Merge only behaviorally-indistinguishable states, and justify each
+  merge.
+
+Two layers, kept honest: Phase 1 is the paper (exact, usually large).
+Phase 2 is exact reduction by reachability. Phase 3 is *our* extension --
+minimality is the paper's future work, not its result. The verifier only
+checks the trace, so your Phase 2 invariants and Phase 3 mapping must
+carry the justification the construction would otherwise give for free.
 
 The DEVSMap format you must follow is described below:
 ---
@@ -119,9 +139,10 @@ Rules:
   that are impossible or redundant, and represent them with fewer meaningful
   state variables when possible. Merging state is allowed only if no
   component id becomes unrecoverable.
-- First explain the invariant(s) you found in plain words, then give the
-  atomic document in ONE ```json block and the init-state document in a
-  second ```json block. No other code blocks.
+- Structure your answer in three parts: Phase 1 (the construction, in
+  words), Phase 2 (the reachability invariants), Phase 3 (the mapping,
+  then the atomic document in ONE ```json block and the init-state
+  document in a second ```json block). No other code blocks.
 
 Coupled model (DEVSMap):
 ```json
