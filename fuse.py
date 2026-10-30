@@ -122,6 +122,46 @@ minimality is the paper's future work, not its result. The verifier only
 checks the trace, so your Phase 2 invariants and Phase 3 mapping must
 carry the justification the construction would otherwise give for free.
 
+## Worked example: 2-player ping-pong (study the pattern, don't copy it)
+
+Coupled model: components A and B passing a ball in a ring
+(A -> B -> A -> ...). Reference trace: (0.1, send, "A:ball"),
+(0.2, send, "B:ball"), ...
+
+Phase 1: product state (phase_A, sigma_A, e_A, phase_B, sigma_B, e_B);
+resultant ta is the min over components; all imminents emit; outputs
+route through the couplings; each component updates by case.
+
+Phase 2: invariants -- exactly one component is in "Send"; Send <=>
+sigma = 0.1, Wait <=> sigma = inf; neither delta_ext reads `e` and no
+passive component can go imminent, so individual clocks are dropped.
+Two reachable states.
+
+Phase 3: mapping -- holder="A" <=> (A Send, B Wait); holder="B" <=>
+(A Wait, B Send). The fused atomic (plain text, not a code block):
+
+    {{"fused_pingpong": {{
+      "x": {{}},
+      "y": {{"send": "string"}},
+      "s": {{"holder": "string", "sigma": "R"}},
+      "delta_int": {{
+        "holder == \"A\"": {{"holder": "\"B\"", "sigma": "0.1"}},
+        "otherwise": {{"holder": "\"A\"", "sigma": "0.1"}}}},
+      "delta_ext": {{"otherwise": {{}}}},
+      "delta_con": {{"otherwise": {{}}}},
+      "lambda": {{
+        "holder == \"A\"": {{"send": "\"A:ball\""}},
+        "otherwise": {{"send": "\"B:ball\""}}}},
+      "ta": {{"otherwise": "sigma"}}}}}}
+
+Init: {{"init_states": {{"fused_pingpong": {{"holder": "\"A\"",
+"sigma": "0.1"}}}}}}.
+
+Note the "<id>:<value>" emission: the verifier checks *which* component
+emitted each output, so bare values are rejected. Your answer must still
+use the ```json code blocks described in the rules below; the example
+above is plain text.
+
 The DEVSMap format you must follow is described below:
 ---
 {devsmap_spec}
