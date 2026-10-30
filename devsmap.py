@@ -1,17 +1,7 @@
-"""Load DEVSMap models (atomic rules: devsmap/SKILL.md).
+"""Load DEVSMap model trees and provide JSON helpers.
 
-The loader does not validate; a file it cannot read raises one ValueError
-naming the file. Stdlib only.
-
-    load_model(path)         -> model dict (below)
-    model_name(doc, where)   -> the one model key of a parsed document
-    write_json(path, doc)    -> write a document (2-space indent, ASCII)
-
-A model dict has: name, kind ("atomic"/"coupled"), path, body (as written);
-coupled models add components [{"model", "id"}] and models {name: model};
-load_model's result adds init {instance path: {state var: value}} from
-<name>_init_state.json (paths are component ids like "sub.leaf"; a
-standalone atomic is keyed by its name).
+`load_model` includes referenced component models and initial states;
+`model_name` extracts the model key, and `write_json` writes a document.
 """
 
 import contextlib
