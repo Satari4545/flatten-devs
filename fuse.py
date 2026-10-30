@@ -221,7 +221,7 @@ def llm_settings():
     if provider == "openai":
         key = os.environ.get("OPENAI_API_KEY")
         model_text = os.environ.get("OPENAI_MODELS") or os.environ.get(
-            "OPENAI_MODEL", "gpt-6-sol")
+            "OPENAI_MODEL", "gpt-6.1-sol")
         prefix = "OPENAI"
     else:
         key = (os.environ.get("GEMINI_API_KEY")

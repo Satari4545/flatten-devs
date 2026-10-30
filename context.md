@@ -220,7 +220,7 @@ cp1252 console).
 | `GEMINI_MODELS` (comma-separated) or `GEMINI_MODEL` | `gemini-3.8-flash` | fuse |
 | `GEMINI_RETRIES` | 3 per model | fuse |
 | `OPENAI_API_KEY` | none; required with OpenAI | fuse |
-| `OPENAI_MODELS` (comma-separated) or `OPENAI_MODEL` | `gpt-6-sol` (requested, unverified API ID) | fuse |
+| `OPENAI_MODELS` (comma-separated) or `OPENAI_MODEL` | `gpt-6.1-sol` | fuse |
 | `OPENAI_RETRIES` | 3 per model | fuse |
 | `FUSE_MAX_ITERS` | 3 LLM rounds | fuse |
 | `CXX` | `g++` | backend |
@@ -231,11 +231,11 @@ cp1252 console).
 
 fuse also reads its variables from `.env` (the environment wins). To use
 OpenAI, set `LLM_PROVIDER=openai` and `OPENAI_API_KEY` in `.env`; the
-requested default model ID is `gpt-6-sol`, which has not been verified in
-OpenAI's public model catalog. If the API rejects it, set `OPENAI_MODEL`
-to an ID available to your account (for example, the documented
-`gpt-5.4`). Gemini remains the default provider. API requests may incur
-charges, including retries and rejected proposals.
+default model ID is `gpt-6.1-sol` ([OpenAI model docs](https://developers.openai.com/api/docs/models/gpt-6.1-sol)).
+Confirm your API account has access; if the API rejects it, set
+`OPENAI_MODEL` to one available to your account. Gemini remains the default
+provider. API requests may incur charges, including retries and rejected
+proposals.
 
 Outputs: an accepted fusion goes to a new `devsmap/out/<name>-<random>/`
 (gitignored) as `<name>_atomic.json` + `<name>_init_state.json`; earlier
