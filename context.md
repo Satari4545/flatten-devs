@@ -56,9 +56,12 @@ proposal that passed `devsmap_check` and compares.
   horizon + 1e-6 and keeps the events with (rounded) t <= horizon, so
   float drift in event times cannot make a model fail against itself.
 - **Compared:** the multiset of (time, port, value) over ALL atomic
-  outputs, including those that only travel along internal couplings;
-  the sender is ignored. Times are rounded to 10 decimals; values are
-  compared exactly as logged (reals with 17 significant digits).
+  outputs, including those that only travel along internal couplings.
+  For a coupled model the sender is folded into the value
+  (`"P01:ball"`), so *which* component emitted each output is compared;
+  a fused atomic must therefore emit `"<id>:<value>"` itself. Times are
+  rounded to 10 decimals; values are compared exactly as logged (reals
+  with 17 significant digits).
 - **Size:** state variables and `delta_int`/`delta_ext`/`lambda` branches,
   proposal vs the sum over the components, are printed on accept, with a
   warning if not smaller. Size is not a rejection criterion.
@@ -170,9 +173,10 @@ format is here; nothing checks it in a user model.
   resolves them into
   `model["init"]` (`{instance path: {var: value}}`). Atomic files never
   carry `initial`, so a fused model is two files.
-- Output values are plain domain values (`"ball"`), no sender prefix: who
-  sent an event is internal structure, and removing it is the point of
-  fusion.
+- Output values of a fused atomic carry the origin: `"<id>:<value>"`
+  (e.g. `"P01:ball"`), so the verifier can check which component emitted
+  each output. Component identity surviving in the trace is the point of
+  the identity contract.
 - The fused atomic carries the coupled model's interface. For a closed
   model like ping-pong it surfaces the components' output port (`send`),
   so the behavior is observable at all.

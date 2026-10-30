@@ -109,6 +109,10 @@ Recode the reachable set as a minimal atomic model:
   produce an anonymous model (a bare timer, a bare counter) that erases
   which component is active: that is a behavioral abstraction, not a
   quotient of the paper's resultant.
+- The fused atomic's `lambda` must make the origin visible in the trace:
+  emit `"<component_id>:<value>"` (e.g. `"A:ball"`, `"P01:ball"`), never
+  a bare value. The verifier folds the original's sender into the value
+  the same way, so a proposal emitting bare values is rejected.
 - Merge only behaviorally-indistinguishable states, and justify each
   merge.
 
@@ -177,13 +181,24 @@ class LLMError(Exception):
 
 class Reference(NamedTuple):
     """The original model's behavior that proposals must reproduce."""
-    events: list     # canonical (time, port, value) events up to horizon
+    events: list     # canonical (time, port, value) events up to horizon;
+                     # for a coupled original the value is sender-prefixed
+                     # ("P01:ball"), so component identity is compared
     window: float    # the LLM sees the events up to this time
     horizon: float   # proposals are compared up to this time
 
 
-def canonical(trace):
-    """Sorted (time, port, value) events; sender and order are not compared."""
+def canonical(trace, prefix_sender=False):
+    """Sorted (time, port, value) events; order is not compared.
+
+    With prefix_sender the sender is folded into the value as
+    "<sender>:<value>", so *which* component emitted each output is
+    compared. A fused atomic must therefore emit "<id>:<value>" itself;
+    a bare value can no longer pass.
+    """
+    if prefix_sender:
+        return sorted((e["time"], e["port"], f'{e["sender"]}:{e["value"]}')
+                      for e in trace)
     return sorted((e["time"], e["port"], str(e["value"])) for e in trace)
 
 
@@ -193,10 +208,18 @@ def shown(events, window):
 
 
 def observe(path, horizon):
-    """Canonical events of the model at `path` up to t = horizon."""
+    """Canonical events of the model at `path` up to t = horizon.
+
+    For a coupled model the sender is folded into the value
+    ("P01:ball"), so the reference records which component emitted each
+    output. An atomic model is compared on its emitted values as-is --
+    which is what forces a fused atomic to emit "<id>:<value>" itself.
+    """
     # Run past the horizon and cut on rounded times, so float drift in the
     # end time cuts the reference and every proposal the same way.
-    events = canonical(cadmium_api.simulate(path, horizon + SLACK))
+    kind = devsmap.load_model(path)["kind"]
+    trace = cadmium_api.simulate(path, horizon + SLACK)
+    events = canonical(trace, prefix_sender=(kind == "coupled"))
     return [e for e in events if e[0] <= horizon]
 
 
