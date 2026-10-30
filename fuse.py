@@ -85,8 +85,13 @@ every product variable.)
 
 ## Phase 2 -- what is reachable (exact, no approximation)
 
-From the given initial state, characterize the reachable set:
+From the given initial state, characterize the FULL reachable set:
 
+- A state is reachable if ANY path from the initial state can reach it,
+  at ANY time -- not just in the next few events. A state that is
+  unreachable for a while but reachable later MUST be kept. Shallow,
+  bounded-horizon reachability analysis is wrong; think through the
+  model's long-run behavior.
 - State the invariants: which combinations of component states and
   elapsed times can actually occur. (Example: "exactly one component is
   in Send; the others are in Wait.")
@@ -94,8 +99,11 @@ From the given initial state, characterize the reachable set:
   a future transition or output: does its delta_ext read `e`? Can it
   become imminent while passive? If neither, its individual clock can be
   discarded -- but say so explicitly, per component.
-- Discard everything unreachable. This step is exact: unreachable states
-  never occur, so removing them changes nothing about the behavior.
+- Discard ONLY what you can prove unreachable by every path. This step
+  is exact: unreachable states never occur, so removing them changes
+  nothing. But the asymmetry matters: keeping a truly-unreachable state
+  is harmless (it never occurs); discarding a reachable one silently
+  breaks the model. When in doubt, KEEP the state.
 
 ## Phase 3 -- the minimal atomic (our extension: justify it)
 
@@ -115,6 +123,12 @@ Recode the reachable set as a minimal atomic model:
   the same way, so a proposal emitting bare values is rejected.
 - Merge only behaviorally-indistinguishable states, and justify each
   merge.
+- Prefer EXPLICIT per-component state over compressed encodings: a
+  reviewer must be able to see each component's state without inferring
+  it through an invariant. Compress (e.g. one holder variable instead of
+  one flag per component) only when the invariant is airtight and you
+  state it. Visibility beats brevity; a wrong compression is a silent
+  correctness bug, a redundant variable is just untidy.
 
 Two layers, kept honest: Phase 1 is the paper (exact, usually large).
 Phase 2 is exact reduction by reachability. Phase 3 is *our* extension --
