@@ -56,9 +56,12 @@ proposal that passed `devsmap_check` and compares.
   horizon + 1e-6 and keeps the events with (rounded) t <= horizon, so
   float drift in event times cannot make a model fail against itself.
 - **Compared:** the multiset of (time, port, value) over ALL atomic
-  outputs, including those that only travel along internal couplings;
-  the sender is ignored. Times are rounded to 10 decimals; values are
-  compared exactly as logged (reals with 17 significant digits).
+  outputs, including those that only travel along internal couplings.
+  For a coupled model the sender is folded into the value
+  (`"P01:ball"`), so *which* component emitted each output is compared;
+  a fused atomic must therefore emit `"<id>:<value>"` itself. Times are
+  rounded to 10 decimals; values are compared exactly as logged (reals
+  with 17 significant digits).
 - **Size:** state variables and `delta_int`/`delta_ext`/`lambda` branches,
   proposal vs the sum over the components, are printed on accept, with a
   warning if not smaller. Size is not a rejection criterion.
@@ -170,9 +173,10 @@ format is here; nothing checks it in a user model.
   resolves them into
   `model["init"]` (`{instance path: {var: value}}`). Atomic files never
   carry `initial`, so a fused model is two files.
-- Output values are plain domain values (`"ball"`), no sender prefix: who
-  sent an event is internal structure, and removing it is the point of
-  fusion.
+- Output values of a fused atomic carry the origin: `"<id>:<value>"`
+  (e.g. `"P01:ball"`), so the verifier can check which component emitted
+  each output. Component identity surviving in the trace is the point of
+  the identity contract.
 - The fused atomic carries the coupled model's interface. For a closed
   model like ping-pong it surfaces the components' output port (`send`),
   so the behavior is observable at all.
@@ -186,8 +190,8 @@ format is here; nothing checks it in a user model.
 ```
 git clone <repo-url> && cd <repo>
 git submodule update --init      # cadmium_v2 + the generator, NOT --recursive
-pip install -U google-genai      # only needed to call the LLM
-cp .env.example .env             # then set GEMINI_API_KEY in .env
+pip install -U google-genai      # Gemini only; for OpenAI: pip install -U openai
+cp .env.example .env             # set the selected provider's key/model
 python main.py --check           # needs g++, no API key
 ```
 
@@ -215,9 +219,13 @@ cp1252 console).
 
 | Variable | Default | Used by |
 |---|---|---|
-| `GEMINI_API_KEY` (or `GOOGLE_API_KEY`, `LLM_API_KEY`) | none | fuse |
+| `LLM_PROVIDER` | `gemini`; set `openai` to use the OpenAI Responses API | fuse |
+| `GEMINI_API_KEY` (or `GOOGLE_API_KEY`, `LLM_API_KEY`) | none; used only with Gemini | fuse |
 | `GEMINI_MODELS` (comma-separated) or `GEMINI_MODEL` | `gemini-3.8-flash` | fuse |
 | `GEMINI_RETRIES` | 3 per model | fuse |
+| `OPENAI_API_KEY` | none; required with OpenAI | fuse |
+| `OPENAI_MODELS` (comma-separated) or `OPENAI_MODEL` | `gpt-6.1-sol` | fuse |
+| `OPENAI_RETRIES` | 3 per model | fuse |
 | `FUSE_MAX_ITERS` | 3 LLM rounds | fuse |
 | `CXX` | `g++` | backend |
 | `CADMIUM_INCLUDE` | `cadmium_v2/include` | backend |
@@ -225,7 +233,13 @@ cp1252 console).
 | `DEVS_GENERATOR_DIR` | `third_party/devsmap_generator` | backend |
 | `DEVS_SIM_TIMEOUT` | 60 s per simulation | backend |
 
-fuse also reads its variables from `.env` (the environment wins).
+fuse also reads its variables from `.env` (the environment wins). To use
+OpenAI, set `LLM_PROVIDER=openai` and `OPENAI_API_KEY` in `.env`; the
+default model ID is `gpt-6.1-sol` ([OpenAI model docs](https://developers.openai.com/api/docs/models/gpt-6.1-sol)).
+Confirm your API account has access; if the API rejects it, set
+`OPENAI_MODEL` to one available to your account. Gemini remains the default
+provider. API requests may incur charges, including retries and rejected
+proposals.
 
 Outputs: an accepted fusion goes to a new `devsmap/out/<name>-<random>/`
 (gitignored) as `<name>_atomic.json` + `<name>_init_state.json`; earlier

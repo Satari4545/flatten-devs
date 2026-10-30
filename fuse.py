@@ -2,17 +2,16 @@
 
     fuse(coupled_path, out_dir) -> 0 (accepted, files written) or 1
 
-The coupled model's Cadmium trace is the reference. Gemini proposes a fused
+The coupled model's Cadmium trace is the reference. An LLM proposes a fused
 atomic plus init state; each proposal is checked (devsmap_check), simulated
 and compared with the reference, and rejections are fed back to the LLM.
 Traces compare as (time, port, value) multisets. The LLM sees the first
 SHOWN_EVENTS events; comparison runs HIDDEN_FACTOR times longer, so replaying
 the shown events is not enough.
 
-Environment (also read from .env): GEMINI_API_KEY (or GOOGLE_API_KEY /
-LLM_API_KEY), GEMINI_MODELS (comma-separated fallbacks; GEMINI_MODEL for
-one), GEMINI_RETRIES (per model, default 3), FUSE_MAX_ITERS (LLM rounds,
-default 3).
+Environment (also read from .env): LLM_PROVIDER (gemini or openai), the
+selected provider's API key, model(s) and retries, and FUSE_MAX_ITERS
+(LLM rounds, default 3).
 """
 
 import json
@@ -44,8 +43,142 @@ You are given TWO compact views of the same DEVS model:
 2. The flattened summary: its components, initial state, couplings, and
 resultant semantics in a compact form.
 
-Your task: combine these views into a MINIMAL fused atomic DEVS model with
-the same output events as the original, expressed as DEVSMap documents.
+Your task: fuse the coupled model into a MINIMAL atomic DEVS model, in
+three phases. Reason step by step and write each phase before moving to
+the next.
+
+Follow the papers exactly:
+- Zeigler, Kewley, Wainer (2025), "Closure under coupling"
+  (Computers 14(12), 514): a coupled model is defined over D, a set of
+  NAMED components, and the closure resultant's state is indexed by those
+  component names. Component identity is part of the construction, not an
+  annotation.
+- Govind, Cardenas, Wainer, "DEVSMap: On the Path of Standardized DEVS
+  Model Representation": components are listed as model name -> instance
+  ids; those ids are the D of the construction above.
+
+## Phase 1 -- the paper's construction (exact, no reduction)
+
+Build the closure paper's resultant conceptually, in six steps:
+
+1. **State.** The product of the components' states, each paired with
+   its elapsed time (time since that component's last transition).
+2. **Time advance.** The minimum, over all components, of (time advance
+   minus elapsed time). Components attaining the minimum are *imminent*.
+3. **Output.** Every imminent component computes its output -- all of
+   them; Parallel DEVS has no select function.
+4. **Routing.** Outputs travel through the coupling table: internal
+   couplings into recipients' input bags, external output couplings out
+   of the model, external input couplings into components from outside.
+5. **Transition.** Each component updates by case: imminent *and*
+   receiving input -> its confluent transition; receiving but not
+   imminent -> its external transition (with its own elapsed time);
+   imminent but not receiving -> its internal transition; neither -> only
+   its elapsed time grows.
+6. **Repeat.** The clock advances to the next minimum; the cycle
+   continues.
+
+For a large coupled model this product state is enormous -- that is
+expected, and it is exactly why Phase 2 exists. Do not minimize yet;
+understand the construction. (Reason about it; you do not need to list
+every product variable.)
+
+## Phase 2 -- what is reachable (exact, no approximation)
+
+From the given initial state, characterize the FULL reachable set:
+
+- A state is reachable if ANY path from the initial state can reach it,
+  at ANY time -- not just in the next few events. A state that is
+  unreachable for a while but reachable later MUST be kept. Shallow,
+  bounded-horizon reachability analysis is wrong; think through the
+  model's long-run behavior.
+- State the invariants: which combinations of component states and
+  elapsed times can actually occur. (Example: "exactly one component is
+  in Send; the others are in Wait.")
+- For each component, determine whether its elapsed time can ever affect
+  a future transition or output: does its delta_ext read `e`? Can it
+  become imminent while passive? If neither, its individual clock can be
+  discarded -- but say so explicitly, per component.
+- Discard ONLY what you can prove unreachable by every path. This step
+  is exact: unreachable states never occur, so removing them changes
+  nothing. But the asymmetry matters: keeping a truly-unreachable state
+  is harmless (it never occurs); discarding a reachable one silently
+  breaks the model. When in doubt, KEEP the state.
+
+## Phase 3 -- the minimal atomic (our extension: justify it)
+
+Recode the reachable set as a minimal atomic model:
+
+- Give the explicit mapping: which reachable product states correspond
+  to each of your fused states (the bisimulation relation).
+- Every component id must appear as its own state variable (or variable
+  group) in the fused atomic, recording that component's state directly.
+  Do NOT produce an anonymous model (a bare timer, a bare counter) that
+  erases which component is which: that is a behavioral abstraction, not
+  a quotient of the paper's resultant.
+- The fused atomic's `lambda` must make the origin visible in the trace:
+  emit `"<component_id>:<value>"` (e.g. `"A:ball"`, `"P01:ball"`), never
+  a bare value. The verifier folds the original's sender into the value
+  the same way, so a proposal emitting bare values is rejected.
+- Merge only behaviorally-indistinguishable states, and justify each
+  merge.
+- Use one state variable per component, named by component id, recording
+  that component's state directly (e.g. `P01`, `P02`, each `"Ball"` or
+  `"NoBall"`). Do NOT compress multiple components' states into a single
+  variable (no holder/pointer/token variable): every component's state
+  must be visible in the state, not inferred through an invariant. If a
+  component has several aspects, use one variable per aspect per
+  component (`P01_phase`, `P01_count`, ...).
+
+Two layers, kept honest: Phase 1 is the paper (exact, usually large).
+Phase 2 is exact reduction by reachability. Phase 3 is *our* extension --
+minimality is the paper's future work, not its result. The verifier only
+checks the trace, so your Phase 2 invariants and Phase 3 mapping must
+carry the justification the construction would otherwise give for free.
+
+## Worked example: 2-player ping-pong (study the pattern, don't copy it)
+
+Coupled model: components A and B passing a ball in a ring
+(A -> B -> A -> ...). Reference trace: (0.1, send, "A:ball"),
+(0.2, send, "B:ball"), ...
+
+Phase 1: product state (phase_A, sigma_A, e_A, phase_B, sigma_B, e_B);
+resultant ta is the min over components; all imminents emit; outputs
+route through the couplings; each component updates by case.
+
+Phase 2: invariants -- exactly one component is in "Send"; Send <=>
+sigma = 0.1, Wait <=> sigma = inf; neither delta_ext reads `e` and no
+passive component can go imminent, so individual clocks are dropped.
+Two reachable states.
+
+Phase 3: mapping -- one state variable per component: `A` is `"Ball"`
+exactly when component A is Send (otherwise `"NoBall"`), and likewise
+for `B`. No holder variable: each component's state is directly
+visible. The fused atomic (plain text, not a code block):
+
+    {{"fused_pingpong": {{
+      "x": {{}},
+      "y": {{"send": "string"}},
+      "s": {{"A": "string", "B": "string", "sigma": "R"}},
+      "delta_int": {{
+        "A == \"Ball\"": {{"A": "\"NoBall\"", "B": "\"Ball\"",
+                           "sigma": "0.1"}},
+        "otherwise": {{"A": "\"Ball\"", "B": "\"NoBall\"",
+                       "sigma": "0.1"}}}},
+      "delta_ext": {{"otherwise": {{}}}},
+      "delta_con": {{"otherwise": {{}}}},
+      "lambda": {{
+        "A == \"Ball\"": {{"send": "\"A:ball\""}},
+        "otherwise": {{"send": "\"B:ball\""}}}},
+      "ta": {{"otherwise": "sigma"}}}}}}
+
+Init: {{"init_states": {{"fused_pingpong": {{"A": "\"Ball\"",
+"B": "\"NoBall\"", "sigma": "0.1"}}}}}}.
+
+Note the "<id>:<value>" emission: the verifier checks *which* component
+emitted each output, so bare values are rejected. Your answer must still
+use the ```json code blocks described in the rules below; the example
+above is plain text.
 
 The DEVSMap format you must follow is described below:
 ---
@@ -57,18 +190,21 @@ Rules:
   <name>_init_state.json. Pick one model name and use it in both.
 - Reproduce every output event of the original's atomic components, also
   the ones that only travel along internal couplings. Events are
-  (time, port, value); which component sent an event is internal
-  structure, not part of the output. This is the coupled model's trace
-  in Cadmium until t = {window}:
+  (time, port, value); the fused model must also keep each event tied to
+  its component, so that every component id stays recoverable from the
+  fused state. This is the coupled model's trace in Cadmium until
+  t = {window}:
 {expected}
 - The verifier keeps comparing after t = {window}, so reproduce the
   behavior, not just the listed events.
 - Look for invariants in the state, such as correlated variables or values
   that are impossible or redundant, and represent them with fewer meaningful
-  state variables when possible.
-- First explain the invariant(s) you found in plain words, then give the
-  atomic document in ONE ```json block and the init-state document in a
-  second ```json block. No other code blocks.
+  state variables when possible. Merging state is allowed only if no
+  component id becomes unrecoverable.
+- Structure your answer in three parts: Phase 1 (the construction, in
+  words), Phase 2 (the reachability invariants), Phase 3 (the mapping,
+  then the atomic document in ONE ```json block and the init-state
+  document in a second ```json block). No other code blocks.
 
 Coupled model (DEVSMap):
 ```json
@@ -103,13 +239,24 @@ class LLMError(Exception):
 
 class Reference(NamedTuple):
     """The original model's behavior that proposals must reproduce."""
-    events: list     # canonical (time, port, value) events up to horizon
+    events: list     # canonical (time, port, value) events up to horizon;
+                     # for a coupled original the value is sender-prefixed
+                     # ("P01:ball"), so component identity is compared
     window: float    # the LLM sees the events up to this time
     horizon: float   # proposals are compared up to this time
 
 
-def canonical(trace):
-    """Sorted (time, port, value) events; sender and order are not compared."""
+def canonical(trace, prefix_sender=False):
+    """Sorted (time, port, value) events; order is not compared.
+
+    With prefix_sender the sender is folded into the value as
+    "<sender>:<value>", so *which* component emitted each output is
+    compared. A fused atomic must therefore emit "<id>:<value>" itself;
+    a bare value can no longer pass.
+    """
+    if prefix_sender:
+        return sorted((e["time"], e["port"], f'{e["sender"]}:{e["value"]}')
+                      for e in trace)
     return sorted((e["time"], e["port"], str(e["value"])) for e in trace)
 
 
@@ -119,10 +266,18 @@ def shown(events, window):
 
 
 def observe(path, horizon):
-    """Canonical events of the model at `path` up to t = horizon."""
+    """Canonical events of the model at `path` up to t = horizon.
+
+    For a coupled model the sender is folded into the value
+    ("P01:ball"), so the reference records which component emitted each
+    output. An atomic model is compared on its emitted values as-is --
+    which is what forces a fused atomic to emit "<id>:<value>" itself.
+    """
     # Run past the horizon and cut on rounded times, so float drift in the
     # end time cuts the reference and every proposal the same way.
-    events = canonical(cadmium_api.simulate(path, horizon + SLACK))
+    kind = devsmap.load_model(path)["kind"]
+    trace = cadmium_api.simulate(path, horizon + SLACK)
+    events = canonical(trace, prefix_sender=(kind == "coupled"))
     return [e for e in events if e[0] <= horizon]
 
 
@@ -214,24 +369,33 @@ def env_int(name, default):
 
 
 def llm_settings():
-    """(api key, models, retries per model) from the environment and .env;
-    an LLMError if they are unusable."""
+    """(provider, api key, models, retries per model) from .env/environment."""
     load_env_file()
-    key = (os.environ.get("GEMINI_API_KEY")
-           or os.environ.get("GOOGLE_API_KEY")
-           or os.environ.get("LLM_API_KEY"))
+    provider = os.environ.get("LLM_PROVIDER", "gemini").strip().lower()
+    if provider not in ("gemini", "openai"):
+        raise LLMError("LLM_PROVIDER must be 'gemini' or 'openai'")
+    if provider == "openai":
+        key = os.environ.get("OPENAI_API_KEY")
+        model_text = os.environ.get("OPENAI_MODELS") or os.environ.get(
+            "OPENAI_MODEL", "gpt-6.1-sol")
+        prefix = "OPENAI"
+    else:
+        key = (os.environ.get("GEMINI_API_KEY")
+               or os.environ.get("GOOGLE_API_KEY")
+               or os.environ.get("LLM_API_KEY"))
+        model_text = os.environ.get("GEMINI_MODELS") or os.environ.get(
+            "GEMINI_MODEL", "gemini-3.8-flash")
+        prefix = "GEMINI"
     if not key:
-        raise LLMError("set GEMINI_API_KEY first (e.g. in .env)")
-    model_text = os.environ.get("GEMINI_MODELS") or os.environ.get(
-        "GEMINI_MODEL", "gemini-3.8-flash")
+        raise LLMError(f"set {prefix}_API_KEY first (e.g. in .env)")
     models = [m.strip() for m in model_text.split(",") if m.strip()]
     if not models:
-        raise LLMError(f"no Gemini model in {model_text!r}")
+        raise LLMError(f"set {prefix}_MODEL to an available model ID")
     try:
-        retries = env_int("GEMINI_RETRIES", 3)
+        retries = env_int(f"{prefix}_RETRIES", 3)
     except ValueError as exc:
         raise LLMError(str(exc)) from None
-    return key, models, retries
+    return provider, key, models, retries
 
 
 def _event_text(event):
@@ -248,10 +412,42 @@ def _event_text(event):
     return ""
 
 
+def _call_openai(prompt, key, models, retries):
+    """Request plain text via the OpenAI Responses API."""
+    try:
+        from openai import OpenAI
+    except ImportError:
+        raise LLMError("install the OpenAI SDK first: "
+                       "pip install -U openai") from None
+    client = OpenAI(api_key=key, max_retries=0)
+    last_error = None
+    for model in models:
+        for attempt in range(1, retries + 1):
+            print(f"fuse: sending request to OpenAI model {model} "
+                  f"(attempt {attempt}/{retries})...")
+            try:
+                response = client.responses.create(model=model, input=prompt)
+                reply = response.output_text
+                if not isinstance(reply, str) or not reply.strip():
+                    raise RuntimeError("response contained no text output")
+            except Exception as exc:
+                last_error = f"{model}: {exc}"
+                print(f"fuse: OpenAI request failed: {exc}")
+                if attempt < retries:
+                    wait = 3 * attempt
+                    print(f"fuse: retrying in {wait}s...")
+                    time.sleep(wait)
+            else:
+                print(f"\nfuse: OpenAI request succeeded:\n{reply}")
+                return reply
+    raise LLMError(f"every OpenAI request failed; last: {last_error}")
+
+
 def call_llm(prompt):
-    """Send `prompt` to Gemini and return the reply, trying every model up
-    to its retries; LLMError if none answers."""
-    key, models, retries = llm_settings()
+    """Ask the selected provider, trying its configured models and retries."""
+    provider, key, models, retries = llm_settings()
+    if provider == "openai":
+        return _call_openai(prompt, key, models, retries)
     try:
         from google import genai
     except ImportError:
