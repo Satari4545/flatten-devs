@@ -41,7 +41,12 @@ The DEVS octuple, with exactly these keys:
   internal transition, then the external one.
 
 Output values assigned by `lambda` are plain values of the port's set
-(e.g. `"ball"`). Never encode a sender or component id inside a value.
+(e.g. `"ball"`). Never encode a sender or component id inside a value --
+with one exception: a *fused* atomic (the output of closure under
+coupling) MUST prefix each output value with the originating component
+id (`"<id>:<value>"`, e.g. `"P01:ball"`), so component identity survives
+in the observable trace and the verifier can check which component
+emitted each output.
 
 Initial values are constants: for `R` a real number written with a
 decimal point (`"0.1"`, `"-2.0"`) or `"inf"`; for `string` a string
