@@ -1,12 +1,10 @@
 # DEVSMap atomic models
 
 How to write a DEVSMap atomic model (Govind, Cardenas & Wainer, "DEVSMAP:
-On the Path of Standardized DEVS Model Representation") that this
-project's checker (`devsmap_check.py`) accepts and the DEVSMap_to_Cadmium
-generator translates correctly. Breaking these rules gets the proposal
-rejected with an error saying where; what the checker leaves out fails in
-the generator, the C++ compiler or the simulation, with that tool's output
-as the error.
+On the Path of Standardized DEVS Model Representation") that the
+DEVSMap_to_Cadmium generator translates correctly. Proposals are not
+checked up front: breaking these rules fails in the generator, the C++
+compiler or the simulation, and that tool's output comes back as the error.
 
 ## Files
 

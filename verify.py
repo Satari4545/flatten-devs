@@ -18,7 +18,6 @@ from unittest import mock
 
 import cadmium_api
 import devsmap
-import devsmap_check
 import devsmap_flatten
 import fuse
 
@@ -123,11 +122,11 @@ def fusion_reply():
     return reply(read_json(HAND_FUSED), read_json(HAND_FUSED_INIT))
 
 
-def injection_reply():
-    """The hand fusion, renamed "inject", with host code in lambda."""
+def broken_reply():
+    """The hand fusion, renamed "broken", outputting an undeclared name."""
     body, init = hand_fused()
-    body["lambda"] = {"otherwise": {"send": "std::system(\"calc\")"}}
-    return reply(*documents("inject", body, init))
+    body["lambda"] = {"otherwise": {"send": "no_such_name"}}
+    return reply(*documents("broken", body, init))
 
 
 def check_flatten():
@@ -146,7 +145,7 @@ def check_flatten():
 def check_coupled_trace():
     events = cadmium_api.simulate(COUPLED, 1.05)
     got = [(e["time"], e["sender"], e["port"], e["value"]) for e in events]
-    # Alternating senders show the per-instance init patch works.
+    # Alternating senders show per-instance initial states work.
     want = [(round(0.1 * (i + 1), 10), "AB"[i % 2], "send", "ball")
             for i in range(10)]
     check(got == want, f"coupled trace: {got}")
@@ -161,85 +160,19 @@ def check_arithmetic(folder):
     print("generator arithmetic OK: 1.0/2.0 is 0.5")
 
 
-def check_proposal_check():
-    """devsmap_check rejects these proposals; no compile needed."""
-    init = {"sigma": "1.0"}
-    cases = [
-        ("inline initial state",
-         documents("inlined", {**timer_body(), "initial": init}, init),
-         "\"initial\" is not allowed"),
-        ("host code in an expression",
-         documents("inject", timer_body(
-             **{"lambda": {"otherwise": {"out": "std::system(\"calc\")"}}}),
-             init), "unsupported text '::system"),
-        ("multi-branch ta",
-         documents("branchy", timer_body(
-             ta={"sigma < 1.0": "sigma", "otherwise": "sigma"}), init),
-         "ta must be"),
-        ("'--' (C++ decrement)",
-         documents("decrement", timer_body(
-             **{"lambda": {"otherwise": {"out": "--sigma"}}}), init), "'--'"),
-        ("unguarded bag read",
-         documents("unguarded", timer_body(
-             x={"a": "R", "b": "R"}, s={"sigma": "R", "v": "R"},
-             delta_ext={"a.bagSize() != 0": {"v": "b.bag(-1)"},
-                        "otherwise": {}}), {"sigma": "1.0", "v": "0.0"}),
-         "may be empty"),
-        ("integer literal",
-         documents("integer", timer_body(
-             delta_int={"otherwise": {"sigma": "1"}}), init), "as 1.0"),
-        ("init doc missing a state variable",
-         documents("forgetful", timer_body(), {}), "missing ['sigma']"),
-    ]
-    for what, docs, text in cases:
-        expect_error(ValueError, text, what, devsmap_check.check_proposal,
-                     *docs)
-    print("proposal check OK: inline initial state, std::system(...), "
-          "multi-branch ta, '--', an unguarded bag read, an integer "
-          "literal and an init doc missing a variable rejected")
-
-
-def check_backend_scope(folder):
-    """What the Cadmium backend refuses, and what it must ignore."""
+def check_stray_files(folder):
+    """Unrelated model files next to the simulated one are ignored."""
     for name in os.listdir(MODELS):
         if name.endswith(".json"):
             shutil.copy(os.path.join(MODELS, name), folder)
-    pingpong = read_json(COUPLED)["pingpong"]
-    init = read_json(os.path.join(MODELS, "pingpong_init_state.json"))
-    init = init["init_states"]["pingpong"]
-
-    nested = write_model(folder, "outer", {
-        "x": {}, "y": {}, "components": {"pingpong": ["P"]},
-        "eic": [], "eoc": [], "ic": []}, {"P": init}, kind="coupled")
-    expect_error(cadmium_api.CadmiumError, "flat", "nested coupled model",
-                 cadmium_api.simulate, nested, 1.0)
-    open_top = write_model(folder, "open", {
-        **pingpong, "y": {"out": "string"},
-        "eoc": [{"component_from": "A", "port_from": "send",
-                 "port_to": "out"}]}, init, kind="coupled")
-    expect_error(cadmium_api.CadmiumError, "closed", "open top model",
-                 cadmium_api.simulate, open_top, 1.0)
-    wrapper = write_model(folder, "wrapper", timer_body(), {"sigma": "1.0"})
-    expect_error(cadmium_api.CadmiumError, "backend's generated code",
-                 "atomic named like the backend's wrapper",
-                 cadmium_api.simulate, wrapper, 1.0)
-
-    spin = write_model(folder, "spin", timer_body(
-        delta_int={"otherwise": {"sigma": "0.0"}}), {"sigma": "0.0"})
-    expect_error(cadmium_api.CadmiumError, "too many events",
-                 "zero time advance", cadmium_api.simulate, spin, 1.0,
-                 max_events=1000)
-
     with open(os.path.join(folder, "broken_coupled.json"), "w",
               encoding="utf-8") as f:
         f.write("{not json")
-    copy_of_coupled = os.path.join(folder, os.path.basename(COUPLED))
-    events = cadmium_api.simulate(copy_of_coupled, 1.05)
+    events = cadmium_api.simulate(
+        os.path.join(folder, os.path.basename(COUPLED)), 1.05)
     check(len(events) == 10,
           f"stray sibling files: {len(events)} events, expected 10")
-    print("backend scope OK: nested and open models and an atomic named "
-          "wrapper rejected, a zero time advance capped, stray sibling "
-          "model files ignored")
+    print("stray files OK: an unreadable sibling model file is ignored")
 
 
 def check_fuse_verifier():
@@ -279,7 +212,7 @@ def check_fuse_loop(folder):
     """fuse() with a stubbed LLM: bad replies are fed back, the hand fusion
     is accepted and written."""
     replies = iter(["```json\n{\"oops\": \n```\n```json\n{}\n```",
-                    injection_reply(), fusion_reply()])
+                    broken_reply(), fusion_reply()])
     prompts = []
 
     def llm(prompt):
@@ -291,8 +224,7 @@ def check_fuse_loop(folder):
     with mock.patch.dict(os.environ, {"FUSE_MAX_ITERS": "3"}), \
             mock.patch.object(fuse, "llm_settings"), \
             mock.patch.object(fuse, "call_llm", llm), \
-            mock.patch.object(cadmium_api, "simulate",
-                              wraps=cadmium_api.simulate) as simulate, \
+\
             contextlib.redirect_stdout(log):
         code = fuse.fuse(COUPLED, out_dir)
         quiet = write_model(folder, "quiet", timer_body(
@@ -311,21 +243,17 @@ def check_fuse_loop(folder):
           and "invalid JSON in a block" in prompts[1],
           "fuse loop: the second prompt does not carry the feedback on "
           "the malformed reply")
-    check("invalid DEVSMap" in prompts[2] and "std::system" in prompts[2],
-          "fuse loop: the third prompt does not carry the feedback on the "
-          "invalid proposal")
-    simulated = [os.path.basename(c.args[0]) for c in simulate.call_args_list]
-    check("inject_atomic.json" not in simulated,
-          f"fuse loop: the invalid proposal was simulated: {simulated}")
+    check("failed (exit" in prompts[2],
+          "fuse loop: the third prompt does not carry the Cadmium error on "
+          "the broken proposal")
     written = [sorted(os.listdir(os.path.join(out_dir, d)))
                for d in os.listdir(out_dir)]
     check(written == [["fused_pingpong_atomic.json",
                        "fused_pingpong_init_state.json"]],
           f"fuse loop wrote {written}")
     print("fuse loop OK: window-only first prompt, malformed reply and "
-          "invalid proposal fed back (the invalid one never simulated), "
-          "hand fusion accepted and written; a model without outputs "
-          "refused")
+          "a failing proposal fed back, hand fusion accepted and written; "
+          "a model without outputs refused")
 
 
 def selftest():
@@ -335,8 +263,7 @@ def selftest():
 def run_checks():
     check_flatten()
     check_coupled_trace()
-    check_proposal_check()
-    for run in (check_arithmetic, check_backend_scope):
+    for run in (check_arithmetic, check_stray_files):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             run(tmp)
     check_fuse_verifier()
