@@ -6,7 +6,9 @@
 An event is {"time", "sender", "port", "value"} (sender is the component id).
 
 The model is staged for James's generator (third_party/devsmap_generator),
-whose generated main.cpp is compiled against Cadmium and run. Models are not
+whose generated main.cpp is compiled against Cadmium and run. Outputs are kept
+in build/<model name>/ (overwritten per run): cpp/ holds the generated C++,
+trace.csv the simulation log and stage/ the generator inputs. Models are not
 validated here: when generating, compiling or simulating fails, CadmiumError
 carries that step's output. An unreadable model file raises devsmap's
 ValueError.
@@ -17,7 +19,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 
 import devsmap
 
@@ -89,23 +90,24 @@ def _run(cmd, what, timeout, cwd):
 def simulate(path, end_time, build_dir=None):
     """Generate, compile and run a DEVSMap model; return its output events.
 
-    `build_dir` is kept for inspection (default: a temporary directory).
+    Outputs go to `build_dir` (default: build/<model name>/), replacing the
+    previous run's: cpp/ (generated C++), trace.csv and stage/.
     """
     model = devsmap.load_model(path)
-    if build_dir is None:
-        with tempfile.TemporaryDirectory(prefix="cadmium_",
-                                         ignore_cleanup_errors=True) as tmp:
-            return _build_and_run(model, end_time, tmp)
-    return _build_and_run(model, end_time, build_dir)
+    build_dir = os.path.abspath(
+        build_dir or os.path.join(_REPO, "build", model["name"]))
+    stage = os.path.join(build_dir, "stage")
+    cpp = os.path.join(build_dir, "cpp")
+    trace = os.path.join(build_dir, "trace.csv")
+    for d in (stage, cpp):
+        shutil.rmtree(d, ignore_errors=True)
+    if os.path.exists(trace):
+        os.remove(trace)
 
-
-def _build_and_run(model, end_time, build_dir):
-    stage = os.path.join(os.path.abspath(build_dir), "stage")
-    if os.path.exists(stage):
-        shutil.rmtree(stage)
     _stage(model, end_time, stage)
     _run([sys.executable, _GENERATOR], "DEVSMap generator", timeout=120,
          cwd=stage)
+    shutil.copytree(os.path.join(stage, "output", "main"), cpp)
 
     cxx = os.environ.get("CXX", "g++")
     exe = os.path.join(stage, "simulation" + (".exe" if os.name == "nt"
@@ -113,13 +115,12 @@ def _build_and_run(model, end_time, build_dir):
     # -static on Windows: never pick up a different libstdc++ DLL from PATH.
     static = ["-static"] if os.name == "nt" else []
     _run([cxx, "-std=c++17", "-O1", *static, "-I", _CADMIUM_INCLUDE,
-          os.path.join("output", "main", "main.cpp"), "-o", exe],
+          os.path.join(cpp, "main.cpp"), "-o", exe],
          "compile", timeout=300, cwd=stage)
 
     r = _run([exe], "simulation", cwd=stage,
              timeout=int(os.environ.get("DEVS_SIM_TIMEOUT", "60")))
     # The generated main.cpp logs with Cadmium's STDOUTLogger.
-    trace = os.path.join(stage, "trace.csv")
     with open(trace, "w", encoding="utf-8") as f:
         f.write(r.stdout)
     return parse_trace(trace)
