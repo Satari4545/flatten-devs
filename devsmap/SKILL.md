@@ -4,7 +4,9 @@ How to write a DEVSMap atomic model (Govind, Cardenas & Wainer, "DEVSMAP:
 On the Path of Standardized DEVS Model Representation") that this
 project's checker (`devsmap_check.py`) accepts and the DEVSMap_to_Cadmium
 generator translates correctly. Breaking these rules gets the proposal
-rejected with an error saying where, or makes it fail to compile.
+rejected with an error saying where; what the checker leaves out fails in
+the generator, the C++ compiler or the simulation, with that tool's output
+as the error.
 
 ## Files
 
@@ -86,11 +88,20 @@ replacement): write `"( sigma + 0.1 ) / 2.0"` and `"0.1 < sigma "`, not
 
 Names (the model, ports, state variables) are identifiers: letters,
 digits and `_`, not starting with a digit or `_`, without `__`, and not
-`e` or `inf`. In addition:
+ending in `State` (the generator names each atomic's state struct
+`<model>State`). In addition:
 
-- Avoid C++ keywords and names the generated code uses (e.g. `Port`,
-  `output`, `state`, `main`, names ending in `State`): they do not
-  compile.
+- No C++ keyword, no all-uppercase name longer than one character
+  (macro style: `EOF`, `NULL`, `X2`; a single letter like `A` is fine),
+  and none of the reserved names
+  - `e`, `inf`, `state`, `id`, `initial_state`, `std`, `cadmium`,
+    `Port`, `Atomic`, `Coupled`, `Component`, `output`,
+    `internalTransition`, `externalTransition`, `confluentTransition`,
+    `timeAdvance`, `logState`, `addComponent`, `addCoupling`,
+    `addInPort`, `addOutPort` (used by the generated C++ and Cadmium),
+  - `main`, `model`, `rootCoordinator`, `wrapper`, `top` (used by the
+    generated main.cpp and the Cadmium backend),
+  - `errno`, `stdin`, `stdout`, `stderr` (C macros).
 - The model name, input ports, output ports and state variables are all
   distinct (no port in both `x` and `y`, no state variable named like a
   port).
