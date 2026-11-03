@@ -3,8 +3,9 @@
 How to write a DEVSMap atomic model (Govind, Cardenas & Wainer, "DEVSMAP:
 On the Path of Standardized DEVS Model Representation") that this
 project's loader (`devsmap.py`) accepts and the DEVSMap_to_Cadmium
-generator translates correctly. Anything outside these rules is rejected
-with an error naming the model, the function and the expression.
+generator translates correctly. Models are not validated: a model outside
+these rules fails in the generator, the C++ compiler or the simulation,
+with that tool's output as the error.
 
 ## Files
 
@@ -98,9 +99,8 @@ ending in `State` (the generator names each atomic's state struct
     `internalTransition`, `externalTransition`, `confluentTransition`,
     `timeAdvance`, `logState`, `addComponent`, `addCoupling`,
     `addInPort`, `addOutPort` (used by the generated C++ and Cadmium),
-  - `main`, `GenModel`, `TraceLogger`, `TooManyEvents`,
-    `kTooManyEvents`, `wrapper`, `top` (used by the Cadmium backend and
-    its sim driver),
+  - `main`, `model`, `rootCoordinator`, `wrapper`, `top` (used by the
+    generated main.cpp and the Cadmium backend),
   - `errno`, `stdin`, `stdout`, `stderr` (C macros).
 - The model name, input ports, output ports and state variables are all
   distinct (no port in both `x` and `y`, no state variable named like a
