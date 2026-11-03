@@ -71,6 +71,7 @@ def _run(cmd, what, timeout, cwd):
     """Run cmd in cwd; a non-zero exit is a CadmiumError with its output."""
     try:
         r = subprocess.run(cmd, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace",
                            timeout=timeout, cwd=cwd)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise CadmiumError(f"{what} failed: {exc}") from None
