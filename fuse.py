@@ -3,8 +3,9 @@
     fuse(coupled_path, out_dir) -> 0 (accepted, files written) or 1
 
 The coupled model's Cadmium trace is the reference. Gemini proposes a fused
-atomic plus init state; each proposal is checked (devsmap_check), simulated
-and compared with the reference, and rejections are fed back to the LLM.
+atomic plus init state; each proposal is simulated and compared with the
+reference. Rejections (an unreadable reply, a failed generate, compile or
+simulate, a trace mismatch) are fed back to the LLM.
 Traces compare as (time, port, value) multisets. The LLM sees the first
 SHOWN_EVENTS events; comparison runs HIDDEN_FACTOR times longer, so replaying
 the shown events is not enough.
@@ -25,7 +26,6 @@ from typing import NamedTuple
 
 import cadmium_api
 import devsmap
-import devsmap_check
 import devsmap_flatten
 
 REPO = os.path.dirname(os.path.abspath(__file__))
@@ -308,9 +308,12 @@ def parse_reply(reply):
     return proposal, docs, None
 
 
-def write_proposal(folder, name, atomic, init):
-    """Write a proposal checked as model `name` to <name>_atomic.json and
-    <name>_init_state.json in folder; return the atomic's path."""
+def write_proposal(folder, atomic, init):
+    """Write a proposal to <name>_atomic.json and <name>_init_state.json in
+    folder; return the atomic's path. ValueError if it has no usable name."""
+    name = devsmap.model_name(atomic, "the atomic document")
+    if os.path.basename(name) != name:
+        raise ValueError(f"model name {name!r} is not a plain name")
     devsmap.write_json(os.path.join(folder, f"{name}_init_state.json"), init)
     path = os.path.join(folder, f"{name}_atomic.json")
     devsmap.write_json(path, atomic)
@@ -339,7 +342,7 @@ def trace_diff(got, expected, limit=3):
 
 
 def verify(path, reference):
-    """(ok, reason): does the checked atomic at `path` match the Reference?"""
+    """(ok, reason): does the atomic at `path` match the Reference?"""
     try:
         got = observe(path, reference.horizon)
     except (ValueError, cadmium_api.CadmiumError) as exc:
@@ -370,7 +373,7 @@ def accept(path, docs, original, reason, out_dir):
               "components")
     os.makedirs(out_dir, exist_ok=True)
     folder = tempfile.mkdtemp(prefix=f"{fused['name']}-", dir=out_dir)
-    write_proposal(folder, fused["name"], *docs)
+    write_proposal(folder, *docs)
     print(f"fuse: wrote {fused['name']}_atomic.json + "
           f"{fused['name']}_init_state.json to {folder}")
 
@@ -409,12 +412,10 @@ def fuse(coupled_path, out_dir=OUT_DIR):
             proposal, docs, reason = parse_reply(reply)
             if docs is not None:
                 try:
-                    name = devsmap_check.check_proposal(*docs)
-                except ValueError as exc:
-                    reason = f"invalid DEVSMap: {exc}"
+                    path = write_proposal(tempfile.mkdtemp(dir=tmp), *docs)
+                except (ValueError, OSError) as exc:
+                    reason = f"unusable proposal: {exc}"
                 else:
-                    path = write_proposal(tempfile.mkdtemp(dir=tmp), name,
-                                          *docs)
                     ok, reason = verify(path, reference)
                     if ok:
                         accept(path, docs, model, reason, out_dir)
