@@ -171,7 +171,7 @@ def check_stray_files(folder):
 
 def check_fuse_verifier():
     reference = fuse.reference_run(COUPLED)
-    check((reference.window, reference.horizon) == (1.0, 3.0),
+    check((reference.window, reference.horizon) == (1.0, fuse.MIN_HORIZON),
           f"fuse reference: window {reference.window}, "
           f"horizon {reference.horizon}")
     ok, info = fuse.verify(HAND_FUSED, reference)

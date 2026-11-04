@@ -31,7 +31,8 @@ OUT_DIR = os.path.join(REPO, "devsmap", "out")
 ENV_FILE = os.path.join(REPO, ".env")
 DEVSMAP_SPEC = os.path.join(REPO, "devsmap", "SKILL.md")
 SHOWN_EVENTS = 10      # reference output events the LLM sees
-HIDDEN_FACTOR = 3      # proposals are compared up to 3x the shown window
+HIDDEN_FACTOR = 3      # proposals are compared up to 3x the shown window,
+MIN_HORIZON = 20.0     # and at least up to this time
 MAX_HORIZON = 1000.0   # the window ends by this time
 SLACK = 1e-6           # runs end this far past the time they are cut at
 REPLY_LIMIT = 1500     # chars of a json-less reply sent back
@@ -263,7 +264,8 @@ def reference_run(path):
     """The original's Reference; ValueError if it gives nothing to fuse.
 
     The window ends at the SHOWN_EVENTS-th event; the horizon grows from
-    HIDDEN_FACTOR times the window until some event lies past the window."""
+    HIDDEN_FACTOR times the window (at least MIN_HORIZON) until some event
+    lies past the window."""
     name = os.path.basename(path)
     horizon = 1.0
     events = observe(path, horizon)
@@ -278,7 +280,7 @@ def reference_run(path):
         raise ValueError(f"{name}: the first {SHOWN_EVENTS} output events "
                          f"are all at t = 0; nothing to fuse over time")
 
-    horizon = round(HIDDEN_FACTOR * window, 10)
+    horizon = max(round(HIDDEN_FACTOR * window, 10), MIN_HORIZON)
     while True:
         events = observe(path, horizon)
         if events[-1][0] > window:
