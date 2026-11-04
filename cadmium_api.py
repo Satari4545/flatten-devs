@@ -14,7 +14,6 @@ ValueError.
 """
 
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -117,30 +116,29 @@ def simulate(path, end_time, build_dir=None):
           os.path.join(cpp, "main.cpp"), "-o", exe],
          "compile", timeout=300, cwd=stage)
 
-    r = _run([exe], "simulation", cwd=stage,
-             timeout=int(os.environ.get("DEVS_SIM_TIMEOUT", "60")))
-    # The generated main.cpp logs with Cadmium's STDOUTLogger.
-    with open(trace, "w", encoding="utf-8") as f:
-        f.write(r.stdout)
+    _run([exe], "simulation", cwd=stage,
+         timeout=int(os.environ.get("DEVS_SIM_TIMEOUT", "60")))
+    # The generated main.cpp logs with Cadmium's CSVLogger.
+    log = os.path.join(stage, "logfile.csv")
+    if not os.path.exists(log):
+        raise CadmiumError("simulation wrote no logfile.csv")
+    shutil.copyfile(log, trace)
     return _parse_trace(trace)
 
 
-_ANSI_COLOR = re.compile(r"\x1b\[[0-9;]*m")
-
-
 def _parse_trace(log_path):
-    """Read a Cadmium STDOUTLogger log (";"-separated, ANSI colours
-    stripped) into output events, skipping state rows.
+    """Read a Cadmium CSVLogger log ("sep=;" line, then ";"-separated rows)
+    into output events, skipping state rows.
 
     Values are verbatim; times are rounded to 10 decimals.
     """
     events = []
     try:
         with open(log_path, encoding="utf-8") as f:
-            rows = [_ANSI_COLOR.sub("", line).rstrip("\n") for line in f]
-        if not rows or not rows[0].startswith("time;"):
+            rows = [line.rstrip("\n") for line in f]
+        if rows[:2] != ["sep=;", "time;model_id;model_name;port_name;data"]:
             raise ValueError("missing header")
-        for row in rows[1:]:
+        for row in rows[2:]:
             # Values may contain ";"; only the first four separate.
             time, _, sender, port, value = row.split(";", 4)
             if port:  # state rows have no port

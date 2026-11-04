@@ -19,7 +19,7 @@ closely as possible.
 |---|---|
 | `devsmap.py` | Loads a model, its component models and initial states (no validation; an unreadable file is a `ValueError` naming it). `write_json` is the one JSON writer. |
 | `devsmap_flatten.py` | Dissolves nesting into leaf atomics and leaf-to-leaf couplings; writes the text summary the LLM gets. Exact, no AI. |
-| `cadmium_api.py` | `simulate(path, end_time)`: stages the model for the DEVSMap generator, compiles the generated `main.cpp` against Cadmium, runs it and parses the STDOUTLogger trace. Failures are `CadmiumError` with that step's output. |
+| `cadmium_api.py` | `simulate(path, end_time)`: stages the model for the DEVSMap generator, compiles the generated `main.cpp` against Cadmium, runs it and parses the CSVLogger trace (`logfile.csv`). Failures are `CadmiumError` with that step's output. |
 | `fuse.py` | Reference run, prompt, LLM call, verify loop. |
 | `main.py` | Command line. |
 | `verify.py` | Check suite; the LLM is replaced by canned replies. |
@@ -162,9 +162,7 @@ In dependency order.
 Get the saved fix (per-instance initial states for multi-instance
 components) merged into James's generator and bump the
 `third_party/devsmap_generator` pin; ping-pong and `--check` then pass.
-In the same PR, switch his `main.cpp` to `CSVLogger` (already a commented
-line in `generate_main_cpp.py`) if he agrees: a plain log file instead of
-coloured stdout.
+The same PR switches his `main.cpp` to `CSVLogger` (`logfile.csv`).
 
 ### 2 Close the remaining generator gaps
 
