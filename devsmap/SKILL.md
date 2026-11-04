@@ -94,8 +94,8 @@ digits and `_`, not starting with a digit or `_`, without `__`, and not
 ending in `State` (the generator names each atomic's state struct
 `<model>State`). In addition:
 
-- No C++ keyword, no all-uppercase name longer than one character
-  (macro style: `EOF`, `NULL`, `X2`; a single letter like `A` is fine),
+- No C++ keyword, no well-known C/C++ macro name (`EOF`, `NULL`,
+  `INFINITY`; component ids from the coupled model, like `P01`, are fine),
   and none of the reserved names
   - `e`, `inf`, `state`, `id`, `initial_state`, `std`, `cadmium`,
     `Port`, `Atomic`, `Coupled`, `Component`, `output`,
