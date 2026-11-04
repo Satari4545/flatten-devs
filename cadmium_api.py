@@ -1,7 +1,6 @@
 """Run DEVSMap models in Cadmium v2, via James's DEVSMap generator.
 
     simulate(path, end_time, build_dir) -> list of output events
-    parse_trace(log_path)               -> list of output events
 
 An event is {"time", "sender", "port", "value"} (sender is the component id).
 
@@ -123,13 +122,13 @@ def simulate(path, end_time, build_dir=None):
     # The generated main.cpp logs with Cadmium's STDOUTLogger.
     with open(trace, "w", encoding="utf-8") as f:
         f.write(r.stdout)
-    return parse_trace(trace)
+    return _parse_trace(trace)
 
 
 _ANSI_COLOR = re.compile(r"\x1b\[[0-9;]*m")
 
 
-def parse_trace(log_path):
+def _parse_trace(log_path):
     """Read a Cadmium STDOUTLogger log (";"-separated, ANSI colours
     stripped) into output events, skipping state rows.
 

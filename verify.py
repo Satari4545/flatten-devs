@@ -7,7 +7,6 @@ A failed check raises CheckFailed. Needs g++; the LLM is stubbed.
 """
 
 import contextlib
-import copy
 import io
 import json
 import os
@@ -38,19 +37,14 @@ def check(ok, message):
         raise CheckFailed(message)
 
 
-def expect_error(error, text, what, run, *args, **kwargs):
-    """Check that run(*args, **kwargs) raises `error` mentioning `text`."""
+def expect_error(error, text, what, run, *args):
+    """Check that run(*args) raises `error` mentioning `text`."""
     try:
-        run(*args, **kwargs)
+        run(*args)
     except error as exc:
         check(text in str(exc), f"{what}: expected {text!r} in: {exc}")
         return
     raise CheckFailed(f"{what}: no {error.__name__} raised")
-
-
-def read_json(path):
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
 
 
 def documents(name, body, init):
@@ -83,10 +77,9 @@ def timer_body(**fields):
 
 
 def hand_fused():
-    """(body, initial state) of the hand fusion, as fresh copies."""
-    name = "fused_pingpong"
-    return (copy.deepcopy(devsmap.load_model(HAND_FUSED)["body"]),
-            read_json(HAND_FUSED_INIT)["init_states"][name])
+    """(body, initial state) of the hand fusion, freshly loaded."""
+    model = devsmap.load_model(HAND_FUSED)
+    return model["body"], model["init"][model["name"]]
 
 
 def slow_ball(folder):
@@ -119,7 +112,8 @@ def reply(model_doc, init_doc):
 
 def fusion_reply():
     """An LLM reply carrying the hand fusion."""
-    return reply(read_json(HAND_FUSED), read_json(HAND_FUSED_INIT))
+    return reply(devsmap.read_json(HAND_FUSED),
+                 devsmap.read_json(HAND_FUSED_INIT))
 
 
 def broken_reply():

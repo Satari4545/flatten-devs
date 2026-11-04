@@ -1,14 +1,15 @@
 """Load DEVSMap model trees and provide JSON helpers.
 
 `load_model` includes referenced component models and initial states;
-`model_name` extracts the model key, and `write_json` writes a document.
+`model_name` extracts the model key; `read_json` and `write_json` read and
+write a document.
 """
 
 import contextlib
 import json
 import os
 
-KINDS = ("atomic", "coupled")
+_KINDS = ("atomic", "coupled")
 
 
 @contextlib.contextmanager
@@ -25,7 +26,7 @@ def _reading(filename):
         raise ValueError(f"{filename}: unexpected structure: {err}") from None
 
 
-def _read_json(path):
+def read_json(path):
     with open(path, encoding="utf-8") as f:
         return json.load(f)
 
@@ -63,9 +64,9 @@ def load_model(path):
 def _load(path):
     filename = os.path.basename(path)
     with _reading(filename):
-        data = _read_json(path)
+        data = read_json(path)
         name = model_name(data, filename)
-        kind = next((k for k in KINDS if filename == f"{name}_{k}.json"),
+        kind = next((k for k in _KINDS if filename == f"{name}_{k}.json"),
                     None)
         if kind is None:
             raise ValueError(f"{filename}: model '{name}' must be in "
@@ -84,7 +85,7 @@ def _load(path):
     model["models"] = {}
     for sub in dict.fromkeys(c["model"] for c in model["components"]):
         found = [p for p in (os.path.join(folder, f"{sub}_{k}.json")
-                             for k in KINDS) if os.path.exists(p)]
+                             for k in _KINDS) if os.path.exists(p)]
         if not found:
             raise ValueError(f"{filename}: component model '{sub}' needs "
                              f"{sub}_atomic.json or {sub}_coupled.json next "
@@ -94,7 +95,7 @@ def _load(path):
 
 
 def _read_init(model):
-    doc = _read_json(model["init_path"])
+    doc = read_json(model["init_path"])
     init = {}
 
     def walk(m, node, path):
