@@ -159,8 +159,8 @@ In dependency order.
 
 ### 1 Upstream the generator fixes
 
-Get the saved fixes (multi-instance components, `string`/`R` types,
-per-instance initial states) merged into James's generator and bump the
+Get the saved fix (per-instance initial states for multi-instance
+components) merged into James's generator and bump the
 `third_party/devsmap_generator` pin; ping-pong and `--check` then pass.
 In the same PR, switch his `main.cpp` to `CSVLogger` (already a commented
 line in `generate_main_cpp.py`) if he agrees: a plain log file instead of

@@ -65,7 +65,7 @@ def write_model(folder, name, body, init, kind="atomic"):
 def timer_body(**fields):
     """An atomic that outputs 1.0/2.0 once, after its initial sigma."""
     body = {
-        "x": {}, "y": {"out": "R"}, "s": {"sigma": "R"},
+        "x": {}, "y": {"out": "double"}, "s": {"sigma": "double"},
         "delta_int": {"otherwise": {"sigma": "inf"}},
         "delta_ext": {"otherwise": {}},
         "delta_con": {"otherwise": {}},
@@ -94,7 +94,7 @@ def count_to_ten(folder):
     """Replays the 10 shown hits, then stops: only the hidden horizon
     sees the difference."""
     body, init = hand_fused()
-    body["s"]["n"] = "R"
+    body["s"]["n"] = "double"
     body["delta_int"] = {
         "n + 1.0 >= 10.0": {"n": "n + 1.0", "sigma": "inf"},
         **{c: {**v, "n": "n + 1.0"} for c, v in body["delta_int"].items()},
