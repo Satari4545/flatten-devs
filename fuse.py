@@ -51,6 +51,8 @@ or a few bullets -- the construction's key facts (Phase 1), the invariants
 and what is discarded with why (Phase 2), the state mapping (Phase 3) --
 then the JSON. The two JSON blocks are the deliverable; the prose is the
 justification you will debug from if the verifier rejects the proposal.
+Write plain text: no LaTeX or math markup; write formulas like
+sigma_i - e_i.
 
 Follow the papers exactly:
 - Zeigler, Kewley, Wainer (2025), "Closure under coupling"
