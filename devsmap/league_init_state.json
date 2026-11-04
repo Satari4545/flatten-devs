@@ -1,0 +1,17 @@
+{
+  "init_states": {
+    "league": {
+      "R": {"rnd": "0", "left": "0", "sigma": "0.1"},
+      "T00": {"idx": "0", "rnd": "0", "home": "0", "away": "0", "striker": "0", "left": "0", "sigma": "inf"},
+      "T01": {"idx": "1", "rnd": "0", "home": "0", "away": "0", "striker": "0", "left": "0", "sigma": "inf"},
+      "T02": {"idx": "2", "rnd": "0", "home": "0", "away": "0", "striker": "0", "left": "0", "sigma": "inf"},
+      "T03": {"idx": "3", "rnd": "0", "home": "0", "away": "0", "striker": "0", "left": "0", "sigma": "inf"},
+      "T04": {"idx": "4", "rnd": "0", "home": "0", "away": "0", "striker": "0", "left": "0", "sigma": "inf"},
+      "T05": {"idx": "5", "rnd": "0", "home": "0", "away": "0", "striker": "0", "left": "0", "sigma": "inf"},
+      "T06": {"idx": "6", "rnd": "0", "home": "0", "away": "0", "striker": "0", "left": "0", "sigma": "inf"},
+      "T07": {"idx": "7", "rnd": "0", "home": "0", "away": "0", "striker": "0", "left": "0", "sigma": "inf"},
+      "T08": {"idx": "8", "rnd": "0", "home": "0", "away": "0", "striker": "0", "left": "0", "sigma": "inf"},
+      "T09": {"idx": "9", "rnd": "0", "home": "0", "away": "0", "striker": "0", "left": "0", "sigma": "inf"}
+    }
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "table": {
+    "x": {
+      "start": "int"
+    },
+    "y": {
+      "hit": "int",
+      "done": "int"
+    },
+    "s": {
+      "idx": "int",
+      "rnd": "int",
+      "home": "int",
+      "away": "int",
+      "striker": "int",
+      "left": "int",
+      "sigma": "double"
+    },
+    "delta_int": {
+      "left > 1 ": {
+        "left": "left - 1",
+        "striker": "home + away - striker",
+        "sigma": "0.1"
+      },
+      "otherwise": {
+        "left": "0",
+        "sigma": "inf"
+      }
+    },
+    "delta_ext": {
+      "idx == 0 ": {
+        "rnd": "start.bag(-1)",
+        "home": "0",
+        "away": "1 + ( 18 - idx + rnd ) % 19",
+        "striker": "home",
+        "left": "2 + ( idx + rnd ) % 10",
+        "sigma": "0.1"
+      },
+      "otherwise": {
+        "rnd": "start.bag(-1)",
+        "home": "1 + ( idx - 1 + rnd ) % 19",
+        "away": "1 + ( 18 - idx + rnd ) % 19",
+        "striker": "home",
+        "left": "2 + ( idx + rnd ) % 10",
+        "sigma": "0.1"
+      }
+    },
+    "delta_con": {
+      "otherwise": {}
+    },
+    "lambda": {
+      "left == 1 ": {
+        "hit": "striker",
+        "done": "rnd"
+      },
+      "otherwise": {
+        "hit": "striker"
+      }
+    },
+    "ta": {
+      "otherwise": "sigma"
+    }
+  }
+}

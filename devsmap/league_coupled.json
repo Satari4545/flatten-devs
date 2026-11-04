@@ -1,0 +1,147 @@
+{
+  "league": {
+    "x": {},
+    "y": {},
+    "components": {
+      "referee": [
+        "R"
+      ],
+      "table": [
+        "T00",
+        "T01",
+        "T02",
+        "T03",
+        "T04",
+        "T05",
+        "T06",
+        "T07",
+        "T08",
+        "T09"
+      ]
+    },
+    "eic": [],
+    "eoc": [],
+    "ic": [
+      {
+        "component_from": "R",
+        "port_from": "start",
+        "component_to": "T00",
+        "port_to": "start"
+      },
+      {
+        "component_from": "R",
+        "port_from": "start",
+        "component_to": "T01",
+        "port_to": "start"
+      },
+      {
+        "component_from": "R",
+        "port_from": "start",
+        "component_to": "T02",
+        "port_to": "start"
+      },
+      {
+        "component_from": "R",
+        "port_from": "start",
+        "component_to": "T03",
+        "port_to": "start"
+      },
+      {
+        "component_from": "R",
+        "port_from": "start",
+        "component_to": "T04",
+        "port_to": "start"
+      },
+      {
+        "component_from": "R",
+        "port_from": "start",
+        "component_to": "T05",
+        "port_to": "start"
+      },
+      {
+        "component_from": "R",
+        "port_from": "start",
+        "component_to": "T06",
+        "port_to": "start"
+      },
+      {
+        "component_from": "R",
+        "port_from": "start",
+        "component_to": "T07",
+        "port_to": "start"
+      },
+      {
+        "component_from": "R",
+        "port_from": "start",
+        "component_to": "T08",
+        "port_to": "start"
+      },
+      {
+        "component_from": "R",
+        "port_from": "start",
+        "component_to": "T09",
+        "port_to": "start"
+      },
+      {
+        "component_from": "T00",
+        "port_from": "done",
+        "component_to": "R",
+        "port_to": "done"
+      },
+      {
+        "component_from": "T01",
+        "port_from": "done",
+        "component_to": "R",
+        "port_to": "done"
+      },
+      {
+        "component_from": "T02",
+        "port_from": "done",
+        "component_to": "R",
+        "port_to": "done"
+      },
+      {
+        "component_from": "T03",
+        "port_from": "done",
+        "component_to": "R",
+        "port_to": "done"
+      },
+      {
+        "component_from": "T04",
+        "port_from": "done",
+        "component_to": "R",
+        "port_to": "done"
+      },
+      {
+        "component_from": "T05",
+        "port_from": "done",
+        "component_to": "R",
+        "port_to": "done"
+      },
+      {
+        "component_from": "T06",
+        "port_from": "done",
+        "component_to": "R",
+        "port_to": "done"
+      },
+      {
+        "component_from": "T07",
+        "port_from": "done",
+        "component_to": "R",
+        "port_to": "done"
+      },
+      {
+        "component_from": "T08",
+        "port_from": "done",
+        "component_to": "R",
+        "port_to": "done"
+      },
+      {
+        "component_from": "T09",
+        "port_from": "done",
+        "component_to": "R",
+        "port_to": "done"
+      }
+    ]
+  }
+}

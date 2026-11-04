@@ -1,0 +1,45 @@
+{
+  "referee": {
+    "x": {
+      "done": "int"
+    },
+    "y": {
+      "start": "int"
+    },
+    "s": {
+      "rnd": "int",
+      "left": "int",
+      "sigma": "double"
+    },
+    "delta_int": {
+      "otherwise": {
+        "left": "10",
+        "sigma": "inf"
+      }
+    },
+    "delta_ext": {
+      "left > 1 ": {
+        "left": "left - 1"
+      },
+      "rnd < 18 ": {
+        "left": "0",
+        "rnd": "rnd + 1",
+        "sigma": "0.5"
+      },
+      "otherwise": {
+        "left": "0"
+      }
+    },
+    "delta_con": {
+      "otherwise": {}
+    },
+    "lambda": {
+      "otherwise": {
+        "start": "rnd"
+      }
+    },
+    "ta": {
+      "otherwise": "sigma"
+    }
+  }
+}
