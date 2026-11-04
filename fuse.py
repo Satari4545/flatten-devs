@@ -401,11 +401,6 @@ def _event_text(event):
         value = getattr(event, attr, None)
         if isinstance(value, str) and value:
             return value
-    if isinstance(event, dict):
-        for key in ("output_text", "text", "delta"):
-            value = event.get(key)
-            if isinstance(value, str) and value:
-                return value
     return ""
 
 

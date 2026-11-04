@@ -130,16 +130,15 @@ _ANSI_COLOR = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def parse_trace(log_path):
-    """Read a ";"-separated Cadmium log (STDOUTLogger or CSVLogger) into
-    output events, skipping state rows.
+    """Read a Cadmium STDOUTLogger log (";"-separated, ANSI colours
+    stripped) into output events, skipping state rows.
 
     Values are verbatim; times are rounded to 10 decimals.
     """
     events = []
     try:
         with open(log_path, encoding="utf-8") as f:
-            rows = [_ANSI_COLOR.sub("", line).rstrip("\n") for line in f
-                    if not line.startswith("sep=")]
+            rows = [_ANSI_COLOR.sub("", line).rstrip("\n") for line in f]
         if not rows or not rows[0].startswith("time;"):
             raise ValueError("missing header")
         for row in rows[1:]:
