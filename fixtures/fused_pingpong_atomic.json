@@ -5,16 +5,19 @@
       "send": "string"
     },
     "s": {
-      "holder": "string",
+      "A": "string",
+      "B": "string",
       "sigma": "R"
     },
     "delta_int": {
-      "holder == \"A\"": {
-        "holder": "\"B\"",
+      "A == \"Ball\"": {
+        "A": "\"NoBall\"",
+        "B": "\"Ball\"",
         "sigma": "0.1"
       },
       "otherwise": {
-        "holder": "\"A\"",
+        "A": "\"Ball\"",
+        "B": "\"NoBall\"",
         "sigma": "0.1"
       }
     },
@@ -25,8 +28,11 @@
       "otherwise": {}
     },
     "lambda": {
+      "A == \"Ball\"": {
+        "send": "\"A:ball\""
+      },
       "otherwise": {
-        "send": "\"ball\""
+        "send": "\"B:ball\""
       }
     },
     "ta": {

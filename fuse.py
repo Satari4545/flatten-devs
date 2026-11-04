@@ -2,17 +2,17 @@
 
     fuse(coupled_path, out_dir) -> 0 (accepted, files written) or 1
 
-The coupled model's Cadmium trace is the reference. Gemini proposes a fused
-atomic plus init state; each proposal is checked (devsmap_check), simulated
-and compared with the reference, and rejections are fed back to the LLM.
+The coupled model's Cadmium trace is the reference. An LLM proposes a fused
+atomic plus init state; each proposal is simulated and compared with the
+reference. Rejections (an unreadable reply, a failed generate, compile or
+simulate, a trace mismatch) are fed back to the LLM.
 Traces compare as (time, port, value) multisets. The LLM sees the first
 SHOWN_EVENTS events; comparison runs HIDDEN_FACTOR times longer, so replaying
 the shown events is not enough.
 
-Environment (also read from .env): GEMINI_API_KEY (or GOOGLE_API_KEY /
-LLM_API_KEY), GEMINI_MODELS (comma-separated fallbacks; GEMINI_MODEL for
-one), GEMINI_RETRIES (per model, default 3), FUSE_MAX_ITERS (LLM rounds,
-default 3).
+Environment (also read from .env): LLM_PROVIDER (gemini or openai), the
+selected provider's API key, model(s) and retries, and FUSE_MAX_ITERS
+(LLM rounds, default 3).
 """
 
 import json
@@ -24,7 +24,6 @@ from typing import NamedTuple
 
 import cadmium_api
 import devsmap
-import devsmap_check
 import devsmap_flatten
 
 REPO = os.path.dirname(os.path.abspath(__file__))
@@ -38,14 +37,138 @@ SLACK = 1e-6           # runs end this far past the time they are cut at
 REPLY_LIMIT = 1500     # chars of a json-less reply sent back
 
 PROMPT = """\
-You are given TWO compact views of the same DEVS model:
+You are given a coupled DEVS model in two forms: its raw DEVSMap files
+(the coupled model, every atomic model it uses, and its initial states)
+and a flattened summary (hierarchy removed: leaf components, their
+initial states, leaf-to-leaf couplings, the atomic models' behavior).
 
-1. The coupled model itself, as DEVSMap JSON.
-2. The flattened summary: its components, initial state, couplings, and
-resultant semantics in a compact form.
+Your task: give the equivalent atomic model -- fuse the coupled model
+into a MINIMAL atomic DEVS model, in three phases. Reason step by step
+and write each phase before moving to the next.
 
-Your task: combine these views into a MINIMAL fused atomic DEVS model with
-the same output events as the original, expressed as DEVSMap documents.
+Output budget: keep the reasoning tight. Each phase gets a short paragraph
+or a few bullets -- the construction's key facts (Phase 1), the invariants
+and what is discarded with why (Phase 2), the state mapping (Phase 3) --
+then the JSON. The two JSON blocks are the deliverable; the prose is the
+justification you will debug from if the verifier rejects the proposal.
+
+Follow the papers exactly:
+- Zeigler, Kewley, Wainer (2025), "Closure under coupling"
+  (Computers 14(12), 514): a coupled model is defined over D, a set of
+  NAMED components, and the closure resultant's state is indexed by those
+  component names. Component identity is part of the construction, not an
+  annotation.
+- Govind, Cardenas, Wainer, "DEVSMap: On the Path of Standardized DEVS
+  Model Representation": components are listed as model name -> instance
+  ids; those ids are the D of the construction above.
+
+## Phase 1 -- the paper's construction (exact, no reduction)
+
+Build the closure paper's resultant conceptually, in six steps:
+
+1. **State.** The product of the components' states, each paired with
+   its elapsed time (time since that component's last transition).
+2. **Time advance.** The minimum, over all components, of (time advance
+   minus elapsed time). Components attaining the minimum are *imminent*.
+3. **Output.** Every imminent component computes its output -- all of
+   them; Parallel DEVS has no select function.
+4. **Routing.** Outputs travel through the coupling table: internal
+   couplings into recipients' input bags, external output couplings out
+   of the model, external input couplings into components from outside.
+5. **Transition.** Each component updates by case: imminent *and*
+   receiving input -> its confluent transition; receiving but not
+   imminent -> its external transition (with its own elapsed time);
+   imminent but not receiving -> its internal transition; neither -> only
+   its elapsed time grows.
+6. **Repeat.** The clock advances to the next minimum; the cycle
+   continues.
+
+This product state is usually large; that is why Phase 2 exists. Do not
+minimize yet, and you do not need to list every product variable.
+
+## Phase 2 -- what is reachable (exact, no approximation)
+
+From the given initial state, characterize the FULL reachable set:
+
+- A state is reachable if ANY path from the initial state reaches it, at
+  ANY time. A state unreachable for a while but reachable later MUST be
+  kept; bounded-horizon reasoning is wrong.
+- State the invariants: which combinations of component states and
+  elapsed times can actually occur (e.g. "exactly one component is in
+  Send; the others are in Wait").
+- Per component, say whether its elapsed time can ever matter: does its
+  delta_ext read `e`? Can it become imminent while passive? If neither,
+  its individual clock can be dropped.
+- Discard ONLY what you can prove unreachable by every path. Keeping an
+  unreachable state is harmless; discarding a reachable one silently
+  breaks the model. When in doubt, KEEP it.
+
+## Phase 3 -- the minimal atomic (our extension: justify it)
+
+Recode the reachable set as an atomic model that keeps component identity:
+
+- **One state variable per component**, named by its id (e.g. `P01`,
+  `P02`), recording that component's state directly. A component with
+  several aspects gets one variable per aspect (`P01_phase`,
+  `P01_count`, ...). Never fold several components into one variable (no
+  holder, pointer, token, bare timer or counter): that erases which
+  component is which and is not a quotient of the paper's resultant.
+- Minimality happens *within* each component's variables: drop a
+  variable only when it is provably redundant -- a function of variables
+  you keep (e.g. sigma_Pi fixed by phase_Pi), or a clock no transition
+  reads and that can never make its component imminent. Merge values of
+  one component's variable only when they are behaviorally
+  indistinguishable, and justify each merge.
+- One shared `sigma` for the fused model's time advance is fine; it is
+  the resultant's clock, not a component's state.
+- `lambda` emits `"<component_id>:<value>"` (e.g. `"A:ball"`), never a
+  bare value: the verifier tags each original output with its sender
+  the same way.
+- Give the explicit mapping: which reachable product states correspond
+  to each fused state (the bisimulation relation).
+
+Phase 1 is the paper (exact). Phase 2 is exact reduction by
+reachability. Phase 3 is *our* extension -- minimality is the paper's
+future work, not its result. The verifier only checks the trace, so your
+Phase 2 invariants and Phase 3 mapping carry the justification.
+
+## Worked example: 2-player ping-pong (study the pattern, don't copy it)
+
+Coupled model: components A and B passing a ball in a ring
+(A -> B -> A -> ...). Reference trace: (0.1, send, "A:ball"),
+(0.2, send, "B:ball"), ...
+
+Phase 1: product state (phase_A, sigma_A, e_A, phase_B, sigma_B, e_B);
+resultant ta is the min over components; all imminents emit; outputs
+route through the couplings; each component updates by case.
+
+Phase 2: invariants -- exactly one component is in "Send"; Send <=>
+sigma = 0.1, Wait <=> sigma = inf; neither delta_ext reads `e` and no
+passive component can go imminent, so individual clocks are dropped.
+Two reachable states.
+
+Phase 3: `A` is `"Ball"` exactly when component A is Send (otherwise
+`"NoBall"`), likewise `B`; one shared `sigma` drives ta. The fused
+atomic (plain text here; your answer uses ```json blocks):
+
+    {{"fused_pingpong": {{
+      "x": {{}},
+      "y": {{"send": "string"}},
+      "s": {{"A": "string", "B": "string", "sigma": "R"}},
+      "delta_int": {{
+        "A == \"Ball\"": {{"A": "\"NoBall\"", "B": "\"Ball\"",
+                           "sigma": "0.1"}},
+        "otherwise": {{"A": "\"Ball\"", "B": "\"NoBall\"",
+                       "sigma": "0.1"}}}},
+      "delta_ext": {{"otherwise": {{}}}},
+      "delta_con": {{"otherwise": {{}}}},
+      "lambda": {{
+        "A == \"Ball\"": {{"send": "\"A:ball\""}},
+        "otherwise": {{"send": "\"B:ball\""}}}},
+      "ta": {{"otherwise": "sigma"}}}}}}
+
+Init: {{"init_states": {{"fused_pingpong": {{"A": "\"Ball\"",
+"B": "\"NoBall\"", "sigma": "0.1"}}}}}}.
 
 The DEVSMap format you must follow is described below:
 ---
@@ -55,25 +178,23 @@ The DEVSMap format you must follow is described below:
 Rules:
 - The fused model is TWO documents: a <name>_atomic.json and its
   <name>_init_state.json. Pick one model name and use it in both.
+- No JSON object may repeat a key (e.g. two "otherwise" branches).
 - Reproduce every output event of the original's atomic components, also
-  the ones that only travel along internal couplings. Events are
-  (time, port, value); which component sent an event is internal
-  structure, not part of the output. This is the coupled model's trace
-  in Cadmium until t = {window}:
+  the ones that only travel along internal couplings, as
+  (time, port, "<component_id>:<value>"). This is the coupled model's
+  trace in Cadmium until t = {window}:
 {expected}
 - The verifier keeps comparing after t = {window}, so reproduce the
   behavior, not just the listed events.
-- Look for invariants in the state, such as correlated variables or values
-  that are impossible or redundant, and represent them with fewer meaningful
-  state variables when possible.
-- First explain the invariant(s) you found in plain words, then give the
-  atomic document in ONE ```json block and the init-state document in a
-  second ```json block. No other code blocks.
+- State-variable rules are in Phase 3; follow them.
+- Answer in three parts: Phase 1 (the construction, in words), Phase 2
+  (the reachability invariants), Phase 3 (the mapping, then the atomic
+  document in ONE ```json block and the init-state document in a second
+  ```json block). No other code blocks in your answer.
 
-Coupled model (DEVSMap):
-```json
-{coupled_json}
-```
+Raw DEVSMap files:
+
+{raw_files}
 
 Flattened summary:
 ```text
@@ -103,26 +224,32 @@ class LLMError(Exception):
 
 class Reference(NamedTuple):
     """The original model's behavior that proposals must reproduce."""
-    events: list     # canonical (time, port, value) events up to horizon
+    events: list     # observe() events up to horizon
     window: float    # the LLM sees the events up to this time
     horizon: float   # proposals are compared up to this time
 
 
-def canonical(trace):
-    """Sorted (time, port, value) events; sender and order are not compared."""
-    return sorted((e["time"], e["port"], str(e["value"])) for e in trace)
-
-
 def shown(events, window):
-    """The part of canonical `events` the LLM gets to see."""
+    """The part of observed `events` the LLM gets to see."""
     return [e for e in events if e[0] <= window]
 
 
 def observe(path, horizon):
-    """Canonical events of the model at `path` up to t = horizon."""
+    """Sorted (time, port, value) events of the model at `path` up to
+    t = horizon; order is not compared.
+
+    For a coupled model the sender is folded into the value ("P01:ball"),
+    so which component emitted each output is compared. An atomic model
+    is compared on its values as-is, so a fused atomic must emit
+    "<id>:<value>" itself.
+    """
+    coupled = devsmap.load_model(path)["kind"] == "coupled"
     # Run past the horizon and cut on rounded times, so float drift in the
     # end time cuts the reference and every proposal the same way.
-    events = canonical(cadmium_api.simulate(path, horizon + SLACK))
+    trace = cadmium_api.simulate(path, horizon + SLACK)
+    events = sorted((e["time"], e["port"],
+                     f'{e["sender"]}:{e["value"]}' if coupled else e["value"])
+                    for e in trace)
     return [e for e in events if e[0] <= horizon]
 
 
@@ -170,27 +297,40 @@ def model_size(model):
     return sum(s for s, _ in sizes), sum(b for _, b in sizes)
 
 
+def model_files(model):
+    """Paths of the model's file and every component model file below it."""
+    paths = [model["path"]]
+    for sub in model.get("models", {}).values():
+        paths += model_files(sub)
+    return list(dict.fromkeys(paths))
+
+
+def raw_file(path):
+    """A file's contents as a ```json block headed by its filename."""
+    with open(path, encoding="utf-8") as f:
+        return f"{os.path.basename(path)}:\n```json\n{f.read().strip()}\n```"
+
+
 def build_prompt(model, reference):
-    with open(model["path"], encoding="utf-8") as f:
-        coupled_json = f.read().strip()
     with open(DEVSMAP_SPEC, encoding="utf-8") as f:
         spec = f.read()
+    paths = model_files(model) + [model["init_path"]]
     expected = [{"time": t, "port": p, "value": v}
                 for t, p, v in shown(reference.events, reference.window)]
     return PROMPT.format(
         devsmap_spec=spec,
         window=reference.window,
         expected=json.dumps(expected, indent=2),
-        coupled_json=coupled_json,
+        raw_files="\n\n".join(raw_file(p) for p in paths),
         summary=devsmap_flatten.flattened_summary(model),
     )
 
 
-def load_env_file(path=ENV_FILE):
+def load_env_file():
     """Load KEY=VALUE lines from .env without adding a dependency."""
-    if not os.path.exists(path):
+    if not os.path.exists(ENV_FILE):
         return
-    with open(path, encoding="utf-8") as f:
+    with open(ENV_FILE, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith("#") or "=" not in line:
@@ -214,24 +354,32 @@ def env_int(name, default):
 
 
 def llm_settings():
-    """(api key, models, retries per model) from the environment and .env;
-    an LLMError if they are unusable."""
-    load_env_file()
-    key = (os.environ.get("GEMINI_API_KEY")
-           or os.environ.get("GOOGLE_API_KEY")
-           or os.environ.get("LLM_API_KEY"))
+    """(provider, api key, models, retries per model) from the environment."""
+    provider = os.environ.get("LLM_PROVIDER", "gemini").strip().lower()
+    if provider not in ("gemini", "openai"):
+        raise LLMError("LLM_PROVIDER must be 'gemini' or 'openai'")
+    if provider == "openai":
+        key = os.environ.get("OPENAI_API_KEY")
+        model_text = os.environ.get("OPENAI_MODELS") or os.environ.get(
+            "OPENAI_MODEL", "gpt-6.1-sol")
+        prefix = "OPENAI"
+    else:
+        key = (os.environ.get("GEMINI_API_KEY")
+               or os.environ.get("GOOGLE_API_KEY")
+               or os.environ.get("LLM_API_KEY"))
+        model_text = os.environ.get("GEMINI_MODELS") or os.environ.get(
+            "GEMINI_MODEL", "gemini-3.8-flash")
+        prefix = "GEMINI"
     if not key:
-        raise LLMError("set GEMINI_API_KEY first (e.g. in .env)")
-    model_text = os.environ.get("GEMINI_MODELS") or os.environ.get(
-        "GEMINI_MODEL", "gemini-3.8-flash")
+        raise LLMError(f"set {prefix}_API_KEY first (e.g. in .env)")
     models = [m.strip() for m in model_text.split(",") if m.strip()]
     if not models:
-        raise LLMError(f"no Gemini model in {model_text!r}")
+        raise LLMError(f"set {prefix}_MODEL to an available model ID")
     try:
-        retries = env_int("GEMINI_RETRIES", 3)
+        retries = env_int(f"{prefix}_RETRIES", 3)
     except ValueError as exc:
         raise LLMError(str(exc)) from None
-    return key, models, retries
+    return provider, key, models, retries
 
 
 def _event_text(event):
@@ -240,18 +388,62 @@ def _event_text(event):
         value = getattr(event, attr, None)
         if isinstance(value, str) and value:
             return value
-    if isinstance(event, dict):
-        for key in ("output_text", "text", "delta"):
-            value = event.get(key)
-            if isinstance(value, str) and value:
-                return value
     return ""
 
 
-def call_llm(prompt):
-    """Send `prompt` to Gemini and return the reply, trying every model up
-    to its retries; LLMError if none answers."""
-    key, models, retries = llm_settings()
+def _status(exc):
+    """The HTTP status an SDK error carries, or None if it has none."""
+    for attr in ("status_code", "code"):
+        value = getattr(exc, attr, None)
+        if isinstance(value, int):
+            return value
+    return None
+
+
+def _with_retries(provider, models, retries, request):
+    """request(model) -> reply text, trying each model with retries.
+
+    A rejected key stops at once and a bad request or unknown model moves
+    on to the next model; anything else (429, 5xx, timeouts) is retried."""
+    last_error = None
+    for model in models:
+        for attempt in range(1, retries + 1):
+            print(f"fuse: {provider} {model} (attempt {attempt}/{retries})...")
+            try:
+                reply = request(model)
+                if not isinstance(reply, str) or not reply.strip():
+                    raise RuntimeError("no text in the reply")
+            except Exception as exc:
+                last_error = f"{model}: {exc}"
+                status = _status(exc)
+                print(f"fuse: {provider} failed: {exc}")
+                if status in (401, 403):
+                    raise LLMError(f"{provider} rejected the API key: "
+                                   f"{last_error}") from None
+                if status in (400, 404):
+                    break
+                if attempt < retries:
+                    time.sleep(3 * attempt)
+            else:
+                # Outside the try: a console print error is not a failed call.
+                print(f"\nfuse: {provider} reply:\n{reply}")
+                return reply
+    raise LLMError(f"every {provider} request failed; last: {last_error}")
+
+
+def call_llm(prompt, settings):
+    """Ask the provider in settings (from llm_settings) for a reply."""
+    provider, key, models, retries = settings
+    if provider == "openai":
+        try:
+            from openai import OpenAI
+        except ImportError:
+            raise LLMError("install the OpenAI SDK first: "
+                           "pip install -U openai") from None
+        client = OpenAI(api_key=key, max_retries=0)
+        return _with_retries("OpenAI", models, retries, lambda model:
+                             client.responses.create(
+                                 model=model, input=prompt).output_text)
     try:
         from google import genai
     except ImportError:
@@ -259,40 +451,34 @@ def call_llm(prompt):
                        "pip install -U google-genai") from None
     client = genai.Client(api_key=key)
 
-    last_error = None
-    for model in models:
-        for attempt in range(1, retries + 1):
-            print(f"fuse: sending streaming request to Gemini model {model} "
-                  f"(attempt {attempt}/{retries})...")
-            chunks = []
-            try:
-                stream = client.interactions.create(
-                    model=model, input=prompt, stream=True)
-                for event in stream:
-                    text = _event_text(event)
-                    if text:
-                        print(".", end="", flush=True)  # progress only
-                        chunks.append(text)
-                reply = "".join(chunks)
-                if not reply.strip():
-                    raise RuntimeError("stream ended without text output")
-            except Exception as exc:
-                last_error = f"{model}: {exc}"
-                print(f"fuse: Gemini request failed: {exc}")
-                if attempt < retries:
-                    wait = 3 * attempt
-                    print(f"fuse: retrying in {wait}s...")
-                    time.sleep(wait)
-            else:
-                # Outside the try: a console print error is not a failed call.
-                print(f"\nfuse: Gemini request succeeded:\n{reply}")
-                return reply
-    raise LLMError(f"every Gemini request failed; last: {last_error}")
+    def stream(model):
+        chunks = []
+        for event in client.interactions.create(model=model, input=prompt,
+                                                stream=True):
+            text = _event_text(event)
+            if text:
+                print(".", end="", flush=True)  # progress only
+                chunks.append(text)
+        return "".join(chunks)
+
+    return _with_retries("Gemini", models, retries, stream)
+
+
+def _unique_keys(pairs):
+    """object_pairs_hook for json.loads: a repeated key is an error."""
+    obj = {}
+    for key, value in pairs:
+        if key in obj:
+            raise ValueError(f"duplicate key {key!r} in one JSON object; "
+                             f"merge its entries into one")
+        obj[key] = value
+    return obj
 
 
 def parse_reply(reply):
     """(proposal text, [atomic doc, init doc] or None, why it is unusable)."""
-    blocks = re.findall(r"```json[ \t]*\n(.*?)```", reply, re.S)
+    blocks = re.findall(r"```json[ \t]*\r?\n(.*?)```", reply,
+                        re.S | re.I)
     proposal = "\n\n".join(blocks) if blocks else reply.strip()
     if len(proposal) > REPLY_LIMIT and not blocks:
         proposal = proposal[:REPLY_LIMIT] + "\n[... truncated]"
@@ -301,15 +487,19 @@ def parse_reply(reply):
             f"expected exactly two ```json blocks (atomic, then "
             f"init-state), found {len(blocks)}")
     try:
-        docs = [json.loads(block) for block in blocks]
-    except json.JSONDecodeError as exc:
+        docs = [json.loads(block, object_pairs_hook=_unique_keys)
+                for block in blocks]
+    except ValueError as exc:
         return proposal, None, f"invalid JSON in a block: {exc}"
     return proposal, docs, None
 
 
-def write_proposal(folder, name, atomic, init):
-    """Write a proposal checked as model `name` to <name>_atomic.json and
-    <name>_init_state.json in folder; return the atomic's path."""
+def write_proposal(folder, atomic, init):
+    """Write a proposal to <name>_atomic.json and <name>_init_state.json in
+    folder; return the atomic's path. ValueError if it has no usable name."""
+    name = devsmap.model_name(atomic, "the atomic document")
+    if os.path.basename(name) != name:
+        raise ValueError(f"model name {name!r} is not a plain name")
     devsmap.write_json(os.path.join(folder, f"{name}_init_state.json"), init)
     path = os.path.join(folder, f"{name}_atomic.json")
     devsmap.write_json(path, atomic)
@@ -324,7 +514,7 @@ def fenced(text):
 
 
 def trace_diff(got, expected, limit=3):
-    """Mismatch report on canonical traces: counts + first differences."""
+    """Mismatch report on observed traces: counts + first differences."""
     lines = [f"trace mismatch: got {len(got)} events, "
              f"expected {len(expected)}"]
     for i in range(max(len(got), len(expected))):
@@ -338,7 +528,7 @@ def trace_diff(got, expected, limit=3):
 
 
 def verify(path, reference):
-    """(ok, reason): does the checked atomic at `path` match the Reference?"""
+    """(ok, reason): does the atomic at `path` match the Reference?"""
     try:
         got = observe(path, reference.horizon)
     except (ValueError, cadmium_api.CadmiumError) as exc:
@@ -369,7 +559,7 @@ def accept(path, docs, original, reason, out_dir):
               "components")
     os.makedirs(out_dir, exist_ok=True)
     folder = tempfile.mkdtemp(prefix=f"{fused['name']}-", dir=out_dir)
-    write_proposal(folder, fused["name"], *docs)
+    write_proposal(folder, *docs)
     print(f"fuse: wrote {fused['name']}_atomic.json + "
           f"{fused['name']}_init_state.json to {folder}")
 
@@ -383,7 +573,7 @@ def fuse(coupled_path, out_dir=OUT_DIR):
     model = devsmap.load_model(coupled_path)
     load_env_file()
     max_iters = env_int("FUSE_MAX_ITERS", 3)
-    llm_settings()
+    settings = llm_settings()
     print(f"fuse: running {model['name']} in Cadmium for the reference "
           f"trace...")
     reference = reference_run(coupled_path)
@@ -398,7 +588,7 @@ def fuse(coupled_path, out_dir=OUT_DIR):
         for attempt in range(1, max_iters + 1):
             print(f"fuse: attempt {attempt}/{max_iters}: asking the LLM...")
             try:
-                reply = call_llm(prompt)
+                reply = call_llm(prompt, settings)
             except LLMError as exc:
                 if proposal is not None:
                     print(f"fuse: last proposal:\n{proposal}\n"
@@ -408,12 +598,10 @@ def fuse(coupled_path, out_dir=OUT_DIR):
             proposal, docs, reason = parse_reply(reply)
             if docs is not None:
                 try:
-                    name = devsmap_check.check_proposal(*docs)
-                except ValueError as exc:
-                    reason = f"invalid DEVSMap: {exc}"
+                    path = write_proposal(tempfile.mkdtemp(dir=tmp), *docs)
+                except (ValueError, OSError) as exc:
+                    reason = f"unusable proposal: {exc}"
                 else:
-                    path = write_proposal(tempfile.mkdtemp(dir=tmp), name,
-                                          *docs)
                     ok, reason = verify(path, reference)
                     if ok:
                         accept(path, docs, model, reason, out_dir)
