@@ -1,0 +1,16 @@
+{
+  "init_states": {
+    "tournament": {
+      "P01": {"phase": "\"Send\"", "sigma": "0.1"},
+      "P02": {"phase": "\"Wait\"", "sigma": "inf"},
+      "P03": {"phase": "\"Wait\"", "sigma": "inf"},
+      "P04": {"phase": "\"Wait\"", "sigma": "inf"},
+      "P05": {"phase": "\"Wait\"", "sigma": "inf"},
+      "P06": {"phase": "\"Wait\"", "sigma": "inf"},
+      "P07": {"phase": "\"Wait\"", "sigma": "inf"},
+      "P08": {"phase": "\"Wait\"", "sigma": "inf"},
+      "P09": {"phase": "\"Wait\"", "sigma": "inf"},
+      "P10": {"phase": "\"Wait\"", "sigma": "inf"}
+    }
+  }
+}

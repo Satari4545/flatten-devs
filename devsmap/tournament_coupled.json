@@ -1,0 +1,34 @@
+{
+  "tournament": {
+    "x": {},
+    "y": {},
+    "components": {
+      "player": [
+        "P01",
+        "P02",
+        "P03",
+        "P04",
+        "P05",
+        "P06",
+        "P07",
+        "P08",
+        "P09",
+        "P10"
+      ]
+    },
+    "eic": [],
+    "eoc": [],
+    "ic": [
+      {"component_from": "P01", "port_from": "send", "component_to": "P02", "port_to": "receive"},
+      {"component_from": "P02", "port_from": "send", "component_to": "P03", "port_to": "receive"},
+      {"component_from": "P03", "port_from": "send", "component_to": "P04", "port_to": "receive"},
+      {"component_from": "P04", "port_from": "send", "component_to": "P05", "port_to": "receive"},
+      {"component_from": "P05", "port_from": "send", "component_to": "P06", "port_to": "receive"},
+      {"component_from": "P06", "port_from": "send", "component_to": "P07", "port_to": "receive"},
+      {"component_from": "P07", "port_from": "send", "component_to": "P08", "port_to": "receive"},
+      {"component_from": "P08", "port_from": "send", "component_to": "P09", "port_to": "receive"},
+      {"component_from": "P09", "port_from": "send", "component_to": "P10", "port_to": "receive"},
+      {"component_from": "P10", "port_from": "send", "component_to": "P01", "port_to": "receive"}
+    ]
+  }
+}
