@@ -37,15 +37,20 @@ SLACK = 1e-6           # runs end this far past the time they are cut at
 REPLY_LIMIT = 1500     # chars of a json-less reply sent back
 
 PROMPT = """\
-You are given TWO compact views of the same DEVS model:
+You are given a coupled DEVS model in two forms: its raw DEVSMap files
+(the coupled model, every atomic model it uses, and its initial states)
+and a flattened summary (hierarchy removed: leaf components, their
+initial states, leaf-to-leaf couplings, the atomic models' behavior).
 
-1. The coupled model itself, as DEVSMap JSON.
-2. The flattened summary: its components, initial state, couplings, and
-resultant semantics in a compact form.
+Your task: give the equivalent atomic model -- fuse the coupled model
+into a MINIMAL atomic DEVS model, in three phases. Reason step by step
+and write each phase before moving to the next.
 
-Your task: fuse the coupled model into a MINIMAL atomic DEVS model, in
-three phases. Reason step by step and write each phase before moving to
-the next.
+Output budget: keep the reasoning tight. Each phase gets a short paragraph
+or a few bullets -- the construction's key facts (Phase 1), the invariants
+and what is discarded with why (Phase 2), the state mapping (Phase 3) --
+then the JSON. The two JSON blocks are the deliverable; the prose is the
+justification you will debug from if the verifier rejects the proposal.
 
 Follow the papers exactly:
 - Zeigler, Kewley, Wainer (2025), "Closure under coupling"
@@ -78,63 +83,54 @@ Build the closure paper's resultant conceptually, in six steps:
 6. **Repeat.** The clock advances to the next minimum; the cycle
    continues.
 
-For a large coupled model this product state is enormous -- that is
-expected, and it is exactly why Phase 2 exists. Do not minimize yet;
-understand the construction. (Reason about it; you do not need to list
-every product variable.)
+This product state is usually large; that is why Phase 2 exists. Do not
+minimize yet, and you do not need to list every product variable.
 
 ## Phase 2 -- what is reachable (exact, no approximation)
 
 From the given initial state, characterize the FULL reachable set:
 
-- A state is reachable if ANY path from the initial state can reach it,
-  at ANY time -- not just in the next few events. A state that is
-  unreachable for a while but reachable later MUST be kept. Shallow,
-  bounded-horizon reachability analysis is wrong; think through the
-  model's long-run behavior.
+- A state is reachable if ANY path from the initial state reaches it, at
+  ANY time. A state unreachable for a while but reachable later MUST be
+  kept; bounded-horizon reasoning is wrong.
 - State the invariants: which combinations of component states and
-  elapsed times can actually occur. (Example: "exactly one component is
-  in Send; the others are in Wait.")
-- For each component, determine whether its elapsed time can ever affect
-  a future transition or output: does its delta_ext read `e`? Can it
-  become imminent while passive? If neither, its individual clock can be
-  discarded -- but say so explicitly, per component.
-- Discard ONLY what you can prove unreachable by every path. This step
-  is exact: unreachable states never occur, so removing them changes
-  nothing. But the asymmetry matters: keeping a truly-unreachable state
-  is harmless (it never occurs); discarding a reachable one silently
-  breaks the model. When in doubt, KEEP the state.
+  elapsed times can actually occur (e.g. "exactly one component is in
+  Send; the others are in Wait").
+- Per component, say whether its elapsed time can ever matter: does its
+  delta_ext read `e`? Can it become imminent while passive? If neither,
+  its individual clock can be dropped.
+- Discard ONLY what you can prove unreachable by every path. Keeping an
+  unreachable state is harmless; discarding a reachable one silently
+  breaks the model. When in doubt, KEEP it.
 
 ## Phase 3 -- the minimal atomic (our extension: justify it)
 
-Recode the reachable set as a minimal atomic model:
+Recode the reachable set as an atomic model that keeps component identity:
 
+- **One state variable per component**, named by its id (e.g. `P01`,
+  `P02`), recording that component's state directly. A component with
+  several aspects gets one variable per aspect (`P01_phase`,
+  `P01_count`, ...). Never fold several components into one variable (no
+  holder, pointer, token, bare timer or counter): that erases which
+  component is which and is not a quotient of the paper's resultant.
+- Minimality happens *within* each component's variables: drop a
+  variable only when it is provably redundant -- a function of variables
+  you keep (e.g. sigma_Pi fixed by phase_Pi), or a clock no transition
+  reads and that can never make its component imminent. Merge values of
+  one component's variable only when they are behaviorally
+  indistinguishable, and justify each merge.
+- One shared `sigma` for the fused model's time advance is fine; it is
+  the resultant's clock, not a component's state.
+- `lambda` emits `"<component_id>:<value>"` (e.g. `"A:ball"`), never a
+  bare value: the verifier tags each original output with its sender
+  the same way.
 - Give the explicit mapping: which reachable product states correspond
-  to each of your fused states (the bisimulation relation).
-- Every component id must appear as its own state variable (or variable
-  group) in the fused atomic, recording that component's state directly.
-  Do NOT produce an anonymous model (a bare timer, a bare counter) that
-  erases which component is which: that is a behavioral abstraction, not
-  a quotient of the paper's resultant.
-- The fused atomic's `lambda` must make the origin visible in the trace:
-  emit `"<component_id>:<value>"` (e.g. `"A:ball"`, `"P01:ball"`), never
-  a bare value. The verifier folds the original's sender into the value
-  the same way, so a proposal emitting bare values is rejected.
-- Merge only behaviorally-indistinguishable states, and justify each
-  merge.
-- Use one state variable per component, named by component id, recording
-  that component's state directly (e.g. `P01`, `P02`, each `"Ball"` or
-  `"NoBall"`). Do NOT compress multiple components' states into a single
-  variable (no holder/pointer/token variable): every component's state
-  must be visible in the state, not inferred through an invariant. If a
-  component has several aspects, use one variable per aspect per
-  component (`P01_phase`, `P01_count`, ...).
+  to each fused state (the bisimulation relation).
 
-Two layers, kept honest: Phase 1 is the paper (exact, usually large).
-Phase 2 is exact reduction by reachability. Phase 3 is *our* extension --
-minimality is the paper's future work, not its result. The verifier only
-checks the trace, so your Phase 2 invariants and Phase 3 mapping must
-carry the justification the construction would otherwise give for free.
+Phase 1 is the paper (exact). Phase 2 is exact reduction by
+reachability. Phase 3 is *our* extension -- minimality is the paper's
+future work, not its result. The verifier only checks the trace, so your
+Phase 2 invariants and Phase 3 mapping carry the justification.
 
 ## Worked example: 2-player ping-pong (study the pattern, don't copy it)
 
@@ -151,10 +147,9 @@ sigma = 0.1, Wait <=> sigma = inf; neither delta_ext reads `e` and no
 passive component can go imminent, so individual clocks are dropped.
 Two reachable states.
 
-Phase 3: mapping -- one state variable per component: `A` is `"Ball"`
-exactly when component A is Send (otherwise `"NoBall"`), and likewise
-for `B`. No holder variable: each component's state is directly
-visible. The fused atomic (plain text, not a code block):
+Phase 3: `A` is `"Ball"` exactly when component A is Send (otherwise
+`"NoBall"`), likewise `B`; one shared `sigma` drives ta. The fused
+atomic (plain text here; your answer uses ```json blocks):
 
     {{"fused_pingpong": {{
       "x": {{}},
@@ -175,11 +170,6 @@ visible. The fused atomic (plain text, not a code block):
 Init: {{"init_states": {{"fused_pingpong": {{"A": "\"Ball\"",
 "B": "\"NoBall\"", "sigma": "0.1"}}}}}}.
 
-Note the "<id>:<value>" emission: the verifier checks *which* component
-emitted each output, so bare values are rejected. Your answer must still
-use the ```json code blocks described in the rules below; the example
-above is plain text.
-
 The DEVSMap format you must follow is described below:
 ---
 {devsmap_spec}
@@ -188,28 +178,23 @@ The DEVSMap format you must follow is described below:
 Rules:
 - The fused model is TWO documents: a <name>_atomic.json and its
   <name>_init_state.json. Pick one model name and use it in both.
+- No JSON object may repeat a key (e.g. two "otherwise" branches).
 - Reproduce every output event of the original's atomic components, also
-  the ones that only travel along internal couplings. Events are
-  (time, port, value); the fused model must also keep each event tied to
-  its component, so that every component id stays recoverable from the
-  fused state. This is the coupled model's trace in Cadmium until
-  t = {window}:
+  the ones that only travel along internal couplings, as
+  (time, port, "<component_id>:<value>"). This is the coupled model's
+  trace in Cadmium until t = {window}:
 {expected}
 - The verifier keeps comparing after t = {window}, so reproduce the
   behavior, not just the listed events.
-- Look for invariants in the state, such as correlated variables or values
-  that are impossible or redundant, and represent them with fewer meaningful
-  state variables when possible. Merging state is allowed only if no
-  component id becomes unrecoverable.
-- Structure your answer in three parts: Phase 1 (the construction, in
-  words), Phase 2 (the reachability invariants), Phase 3 (the mapping,
-  then the atomic document in ONE ```json block and the init-state
-  document in a second ```json block). No other code blocks.
+- State-variable rules are in Phase 3; follow them.
+- Answer in three parts: Phase 1 (the construction, in words), Phase 2
+  (the reachability invariants), Phase 3 (the mapping, then the atomic
+  document in ONE ```json block and the init-state document in a second
+  ```json block). No other code blocks in your answer.
 
-Coupled model (DEVSMap):
-```json
-{coupled_json}
-```
+Raw DEVSMap files:
+
+{raw_files}
 
 Flattened summary:
 ```text
@@ -325,18 +310,31 @@ def model_size(model):
     return sum(s for s, _ in sizes), sum(b for _, b in sizes)
 
 
+def model_files(model):
+    """Paths of the model's file and every component model file below it."""
+    paths = [model["path"]]
+    for sub in model.get("models", {}).values():
+        paths += model_files(sub)
+    return list(dict.fromkeys(paths))
+
+
+def raw_file(path):
+    """A file's contents as a ```json block headed by its filename."""
+    with open(path, encoding="utf-8") as f:
+        return f"{os.path.basename(path)}:\n```json\n{f.read().strip()}\n```"
+
+
 def build_prompt(model, reference):
-    with open(model["path"], encoding="utf-8") as f:
-        coupled_json = f.read().strip()
     with open(DEVSMAP_SPEC, encoding="utf-8") as f:
         spec = f.read()
+    paths = model_files(model) + [model["init_path"]]
     expected = [{"time": t, "port": p, "value": v}
                 for t, p, v in shown(reference.events, reference.window)]
     return PROMPT.format(
         devsmap_spec=spec,
         window=reference.window,
         expected=json.dumps(expected, indent=2),
-        coupled_json=coupled_json,
+        raw_files="\n\n".join(raw_file(p) for p in paths),
         summary=devsmap_flatten.flattened_summary(model),
     )
 
@@ -369,8 +367,7 @@ def env_int(name, default):
 
 
 def llm_settings():
-    """(provider, api key, models, retries per model) from .env/environment."""
-    load_env_file()
+    """(provider, api key, models, retries per model) from the environment."""
     provider = os.environ.get("LLM_PROVIDER", "gemini").strip().lower()
     if provider not in ("gemini", "openai"):
         raise LLMError("LLM_PROVIDER must be 'gemini' or 'openai'")
@@ -412,42 +409,59 @@ def _event_text(event):
     return ""
 
 
-def _call_openai(prompt, key, models, retries):
-    """Request plain text via the OpenAI Responses API."""
-    try:
-        from openai import OpenAI
-    except ImportError:
-        raise LLMError("install the OpenAI SDK first: "
-                       "pip install -U openai") from None
-    client = OpenAI(api_key=key, max_retries=0)
+def _status(exc):
+    """The HTTP status an SDK error carries, or None if it has none."""
+    for attr in ("status_code", "code"):
+        value = getattr(exc, attr, None)
+        if isinstance(value, int):
+            return value
+    return None
+
+
+def _with_retries(provider, models, retries, request):
+    """request(model) -> reply text, trying each model with retries.
+
+    A rejected key stops at once and a bad request or unknown model moves
+    on to the next model; anything else (429, 5xx, timeouts) is retried."""
     last_error = None
     for model in models:
         for attempt in range(1, retries + 1):
-            print(f"fuse: sending request to OpenAI model {model} "
-                  f"(attempt {attempt}/{retries})...")
+            print(f"fuse: {provider} {model} (attempt {attempt}/{retries})...")
             try:
-                response = client.responses.create(model=model, input=prompt)
-                reply = response.output_text
+                reply = request(model)
                 if not isinstance(reply, str) or not reply.strip():
-                    raise RuntimeError("response contained no text output")
+                    raise RuntimeError("no text in the reply")
             except Exception as exc:
                 last_error = f"{model}: {exc}"
-                print(f"fuse: OpenAI request failed: {exc}")
+                status = _status(exc)
+                print(f"fuse: {provider} failed: {exc}")
+                if status in (401, 403):
+                    raise LLMError(f"{provider} rejected the API key: "
+                                   f"{last_error}") from None
+                if status in (400, 404):
+                    break
                 if attempt < retries:
-                    wait = 3 * attempt
-                    print(f"fuse: retrying in {wait}s...")
-                    time.sleep(wait)
+                    time.sleep(3 * attempt)
             else:
-                print(f"\nfuse: OpenAI request succeeded:\n{reply}")
+                # Outside the try: a console print error is not a failed call.
+                print(f"\nfuse: {provider} reply:\n{reply}")
                 return reply
-    raise LLMError(f"every OpenAI request failed; last: {last_error}")
+    raise LLMError(f"every {provider} request failed; last: {last_error}")
 
 
-def call_llm(prompt):
-    """Ask the selected provider, trying its configured models and retries."""
-    provider, key, models, retries = llm_settings()
+def call_llm(prompt, settings):
+    """Ask the provider in settings (from llm_settings) for a reply."""
+    provider, key, models, retries = settings
     if provider == "openai":
-        return _call_openai(prompt, key, models, retries)
+        try:
+            from openai import OpenAI
+        except ImportError:
+            raise LLMError("install the OpenAI SDK first: "
+                           "pip install -U openai") from None
+        client = OpenAI(api_key=key, max_retries=0)
+        return _with_retries("OpenAI", models, retries, lambda model:
+                             client.responses.create(
+                                 model=model, input=prompt).output_text)
     try:
         from google import genai
     except ImportError:
@@ -455,40 +469,34 @@ def call_llm(prompt):
                        "pip install -U google-genai") from None
     client = genai.Client(api_key=key)
 
-    last_error = None
-    for model in models:
-        for attempt in range(1, retries + 1):
-            print(f"fuse: sending streaming request to Gemini model {model} "
-                  f"(attempt {attempt}/{retries})...")
-            chunks = []
-            try:
-                stream = client.interactions.create(
-                    model=model, input=prompt, stream=True)
-                for event in stream:
-                    text = _event_text(event)
-                    if text:
-                        print(".", end="", flush=True)  # progress only
-                        chunks.append(text)
-                reply = "".join(chunks)
-                if not reply.strip():
-                    raise RuntimeError("stream ended without text output")
-            except Exception as exc:
-                last_error = f"{model}: {exc}"
-                print(f"fuse: Gemini request failed: {exc}")
-                if attempt < retries:
-                    wait = 3 * attempt
-                    print(f"fuse: retrying in {wait}s...")
-                    time.sleep(wait)
-            else:
-                # Outside the try: a console print error is not a failed call.
-                print(f"\nfuse: Gemini request succeeded:\n{reply}")
-                return reply
-    raise LLMError(f"every Gemini request failed; last: {last_error}")
+    def stream(model):
+        chunks = []
+        for event in client.interactions.create(model=model, input=prompt,
+                                                stream=True):
+            text = _event_text(event)
+            if text:
+                print(".", end="", flush=True)  # progress only
+                chunks.append(text)
+        return "".join(chunks)
+
+    return _with_retries("Gemini", models, retries, stream)
+
+
+def _unique_keys(pairs):
+    """object_pairs_hook for json.loads: a repeated key is an error."""
+    obj = {}
+    for key, value in pairs:
+        if key in obj:
+            raise ValueError(f"duplicate key {key!r} in one JSON object; "
+                             f"merge its entries into one")
+        obj[key] = value
+    return obj
 
 
 def parse_reply(reply):
     """(proposal text, [atomic doc, init doc] or None, why it is unusable)."""
-    blocks = re.findall(r"```json[ \t]*\n(.*?)```", reply, re.S)
+    blocks = re.findall(r"```json[ \t]*\r?\n(.*?)```", reply,
+                        re.S | re.I)
     proposal = "\n\n".join(blocks) if blocks else reply.strip()
     if len(proposal) > REPLY_LIMIT and not blocks:
         proposal = proposal[:REPLY_LIMIT] + "\n[... truncated]"
@@ -497,8 +505,9 @@ def parse_reply(reply):
             f"expected exactly two ```json blocks (atomic, then "
             f"init-state), found {len(blocks)}")
     try:
-        docs = [json.loads(block) for block in blocks]
-    except json.JSONDecodeError as exc:
+        docs = [json.loads(block, object_pairs_hook=_unique_keys)
+                for block in blocks]
+    except ValueError as exc:
         return proposal, None, f"invalid JSON in a block: {exc}"
     return proposal, docs, None
 
@@ -582,7 +591,7 @@ def fuse(coupled_path, out_dir=OUT_DIR):
     model = devsmap.load_model(coupled_path)
     load_env_file()
     max_iters = env_int("FUSE_MAX_ITERS", 3)
-    llm_settings()
+    settings = llm_settings()
     print(f"fuse: running {model['name']} in Cadmium for the reference "
           f"trace...")
     reference = reference_run(coupled_path)
@@ -597,7 +606,7 @@ def fuse(coupled_path, out_dir=OUT_DIR):
         for attempt in range(1, max_iters + 1):
             print(f"fuse: attempt {attempt}/{max_iters}: asking the LLM...")
             try:
-                reply = call_llm(prompt)
+                reply = call_llm(prompt, settings)
             except LLMError as exc:
                 if proposal is not None:
                     print(f"fuse: last proposal:\n{proposal}\n"
