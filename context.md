@@ -42,7 +42,7 @@ proposal and compares.
 
 - **Window:** the time of the 10th reference output event (or the last
   one if fewer occur by t = 1000). The LLM sees only events up to it.
-- **Horizon:** 3x the window, grown x10 (up to t = 3000) until some
+- **Horizon:** 3x the window and at least t = 20, grown x10 (up to t = 3000) until some
   event lies past the window, so replaying the shown events fails. A
   divergence past the window is reported only as "diverges after that
   window", never with the hidden events.
