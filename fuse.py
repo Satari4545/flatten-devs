@@ -20,6 +20,7 @@ import os
 import re
 import tempfile
 import time
+from collections import Counter
 from typing import NamedTuple
 
 import cadmium_api
@@ -31,9 +32,11 @@ OUT_DIR = os.path.join(REPO, "devsmap", "out")
 ENV_FILE = os.path.join(REPO, ".env")
 DEVSMAP_SPEC = os.path.join(REPO, "devsmap", "SKILL.md")
 SHOWN_EVENTS = 10      # reference output events the LLM sees
-HIDDEN_FACTOR = 3      # proposals are compared up to 3x the shown window,
-MIN_HORIZON = 20.0     # and at least up to this time
+HIDDEN_FACTOR = 3      # proposals are compared from 3x the shown window,
+MIN_HORIZON = 20.0     # and at least up to this time, doubled until every
+                       # sender has emitted twice (up to 3x MAX_HORIZON)
 MAX_HORIZON = 1000.0   # the window ends by this time
+MAX_OUTPUT_TOKENS = 100_000
 SLACK = 1e-6           # runs end this far past the time they are cut at
 REPLY_LIMIT = 1500     # chars of a json-less reply sent back
 
@@ -241,6 +244,18 @@ def shown(events, window):
     return [e for e in events if e[0] <= window]
 
 
+def _is_coupled(path):
+    return devsmap.load_model(path)["kind"] == "coupled"
+
+
+def _every_sender_twice(events, coupled):
+    """Whether every component emitting in observe() `events` emits at
+    least twice (an atomic model is its only sender)."""
+    senders = Counter(e[2].split(":", 1)[0] if coupled else None
+                      for e in events)
+    return min(senders.values()) >= 2
+
+
 def observe(path, horizon):
     """Sorted (time, port, value) events of the model at `path` up to
     t = horizon; order is not compared.
@@ -250,7 +265,7 @@ def observe(path, horizon):
     is compared on its values as-is, so a fused atomic must emit
     "<id>:<value>" itself.
     """
-    coupled = devsmap.load_model(path)["kind"] == "coupled"
+    coupled = _is_coupled(path)
     # Run past the horizon and cut on rounded times, so float drift in the
     # end time cuts the reference and every proposal the same way.
     trace = cadmium_api.simulate(path, horizon + SLACK)
@@ -263,9 +278,10 @@ def observe(path, horizon):
 def reference_run(path):
     """The original's Reference; ValueError if it gives nothing to fuse.
 
-    The window ends at the SHOWN_EVENTS-th event; the horizon grows from
-    HIDDEN_FACTOR times the window (at least MIN_HORIZON) until some event
-    lies past the window."""
+    The window ends at the SHOWN_EVENTS-th event. The horizon starts at
+    HIDDEN_FACTOR times the window (at least MIN_HORIZON) and doubles until
+    some event lies past the window and every sender has emitted twice (one
+    full cycle), stopping at HIDDEN_FACTOR * MAX_HORIZON."""
     name = os.path.basename(path)
     horizon = 1.0
     events = observe(path, horizon)
@@ -280,17 +296,20 @@ def reference_run(path):
         raise ValueError(f"{name}: the first {SHOWN_EVENTS} output events "
                          f"are all at t = 0; nothing to fuse over time")
 
+    coupled = _is_coupled(path)
+    cap = HIDDEN_FACTOR * MAX_HORIZON
     horizon = max(round(HIDDEN_FACTOR * window, 10), MIN_HORIZON)
     while True:
         events = observe(path, horizon)
-        if events[-1][0] > window:
+        if events[-1][0] > window and (
+                horizon >= cap or _every_sender_twice(events, coupled)):
             return Reference(events, window, horizon)
-        if horizon >= HIDDEN_FACTOR * MAX_HORIZON:
+        if horizon >= cap:
             raise ValueError(
                 f"{name}: no output events after t = {window} (up to "
                 f"t = {horizon}), so a model replaying the shown events "
                 f"could not be told apart; nothing to fuse")
-        horizon = min(10 * horizon, HIDDEN_FACTOR * MAX_HORIZON)
+        horizon = min(2 * horizon, cap)
 
 
 def model_size(model):
@@ -451,7 +470,9 @@ def call_llm(prompt, settings):
         client = OpenAI(api_key=key, max_retries=0)
         return _with_retries("OpenAI", models, retries, lambda model:
                              client.responses.create(
-                                 model=model, input=prompt).output_text)
+                                 model=model, input=prompt,
+                                 max_output_tokens=MAX_OUTPUT_TOKENS
+                             ).output_text)
     try:
         from google import genai
     except ImportError:
@@ -461,7 +482,9 @@ def call_llm(prompt, settings):
 
     def stream(model):
         chunks = []
+        config = {"max_output_tokens": MAX_OUTPUT_TOKENS}
         for event in client.interactions.create(model=model, input=prompt,
+                                                generation_config=config,
                                                 stream=True):
             text = _event_text(event)
             if text:
