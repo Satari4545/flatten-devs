@@ -152,3 +152,76 @@ to `build/`. Both are gitignored.
 - `fixtures/`: `fused_pingpong_*`, a hand fusion the checks expect to pass
 - `cadmium_v2/`, `third_party/devsmap_generator/`: submodules
 - `.env.example`: template for `.env`
+
+## Scaling plan
+
+In dependency order.
+
+### 1 Upstream the generator fixes
+
+Get the saved fixes (multi-instance components, `string`/`R` types,
+per-instance initial states) merged into James's generator and bump the
+`third_party/devsmap_generator` pin; ping-pong and `--check` then pass.
+In the same PR, switch his `main.cpp` to `CSVLogger` (already a commented
+line in `generate_main_cpp.py`) if he agrees: a plain log file instead of
+coloured stdout.
+
+### 2 Close the remaining generator gaps
+
+Also upstream, each needed by a later item:
+
+- **EIC/EOC and coupled-model ports**, for open models (3) and nested
+  models (4).
+- **Init states per nesting level**: check that a nested component gets
+  its state from the hierarchical init file, and fix it if not.
+- **`delta_con` and multi-branch `ta`**: SKILL.md forbids them until the
+  generator translates them.
+
+### 3 Open models: input scripts
+
+Needs 2. Today nothing drives input ports, so only closed models are
+checked. Generate input scripts and feed the same script to the original
+and the proposal: cases from the model's ports and value sets, seeded
+random scripts (the seed is logged), inputs exactly on internal event
+times (exercises `delta_con`), bursts, and the empty script. Each input
+port gets a Cadmium `IEStream` atomic, wired in by a test coupled model.
+The verdict reads "matches under scripts S up to horizon H"; fuse refuses
+an open model it has no scripts for.
+
+### 4 Bigger models: fuse bottom-up
+
+Needs 2 and 3. One LLM call over a whole large model hits state
+explosion, and every check re-simulates all of it. Instead fuse the
+innermost coupled model first, check it alone (its scripts can include the
+inputs it received in a run of the full original), replace it by its
+fused atomic (same ports) and move up a level. Finish with one end-to-end
+run of the root's fused atomic against the original full model: passing
+each level on finite scripts does not prove the composition.
+
+Once a sub-model is fused its internal events are gone, so runs are
+compared on EOC outputs (or a named set of ports) instead of every atomic
+output.
+
+### 5 Stronger checks
+
+- **Float tolerance**: real-valued outputs need a per-instant comparison
+  with a tolerance instead of exact values.
+- **State mapping**: the log already has state rows. Have the LLM state a
+  map from fused state to the components' states and check it at every
+  event time; this catches outputs that agree by luck within the horizon.
+- **Second simulator** (e.g. adevs): the only check against bugs shared by
+  both runs. Needs a second DEVSMap translator; not planned until one
+  exists.
+
+### 6 Cost and reproducibility
+
+- Prompt size grows with the model and nothing caps it.
+- Save prompt, model name and reply per run; today the prompt is not kept.
+- Every simulation regenerates and recompiles, and the reference run
+  (several simulations) is redone on every fuse. Cache by model hash.
+
+### 7 Size as a score
+
+Size stays a report, never a reason to reject. A score over accepted
+fusions (e.g. flagging one that just concatenates the components'
+states) belongs in reporting.
