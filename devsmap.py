@@ -1,24 +1,15 @@
-"""Load DEVSMap models (atomic rules: devsmap/SKILL.md).
+"""Load DEVSMap model trees and provide JSON helpers.
 
-The loader does not validate; a file it cannot read raises one ValueError
-naming the file. Stdlib only.
-
-    load_model(path)         -> model dict (below)
-    model_name(doc, where)   -> the one model key of a parsed document
-    write_json(path, doc)    -> write a document (2-space indent, ASCII)
-
-A model dict has: name, kind ("atomic"/"coupled"), path, body (as written);
-coupled models add components [{"model", "id"}] and models {name: model};
-load_model's result adds init {instance path: {state var: value}} from
-<name>_init_state.json (paths are component ids like "sub.leaf"; a
-standalone atomic is keyed by its name).
+`load_model` includes referenced component models and initial states;
+`model_name` extracts the model key; `read_json` and `write_json` read and
+write a document.
 """
 
 import contextlib
 import json
 import os
 
-KINDS = ("atomic", "coupled")
+_KINDS = ("atomic", "coupled")
 
 
 @contextlib.contextmanager
@@ -35,7 +26,7 @@ def _reading(filename):
         raise ValueError(f"{filename}: unexpected structure: {err}") from None
 
 
-def _read_json(path):
+def read_json(path):
     with open(path, encoding="utf-8") as f:
         return json.load(f)
 
@@ -63,18 +54,19 @@ def load_model(path):
         raise ValueError(f"{os.path.basename(path)}: models nested too "
                          f"deeply (does a coupled model contain "
                          f"itself?)") from None
-    filename = f"{model['name']}_init_state.json"
-    with _reading(filename):
-        model["init"] = _read_init(model, filename)
+    model["init_path"] = os.path.join(os.path.dirname(model["path"]),
+                                      f"{model['name']}_init_state.json")
+    with _reading(os.path.basename(model["init_path"])):
+        model["init"] = _read_init(model)
     return model
 
 
 def _load(path):
     filename = os.path.basename(path)
     with _reading(filename):
-        data = _read_json(path)
+        data = read_json(path)
         name = model_name(data, filename)
-        kind = next((k for k in KINDS if filename == f"{name}_{k}.json"),
+        kind = next((k for k in _KINDS if filename == f"{name}_{k}.json"),
                     None)
         if kind is None:
             raise ValueError(f"{filename}: model '{name}' must be in "
@@ -93,7 +85,7 @@ def _load(path):
     model["models"] = {}
     for sub in dict.fromkeys(c["model"] for c in model["components"]):
         found = [p for p in (os.path.join(folder, f"{sub}_{k}.json")
-                             for k in KINDS) if os.path.exists(p)]
+                             for k in _KINDS) if os.path.exists(p)]
         if not found:
             raise ValueError(f"{filename}: component model '{sub}' needs "
                              f"{sub}_atomic.json or {sub}_coupled.json next "
@@ -102,8 +94,8 @@ def _load(path):
     return model
 
 
-def _read_init(model, filename):
-    doc = _read_json(os.path.join(os.path.dirname(model["path"]), filename))
+def _read_init(model):
+    doc = read_json(model["init_path"])
     init = {}
 
     def walk(m, node, path):

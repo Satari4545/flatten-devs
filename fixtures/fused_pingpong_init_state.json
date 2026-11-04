@@ -1,7 +1,8 @@
 {
   "init_states": {
     "fused_pingpong": {
-      "holder": "\"A\"",
+      "A": "\"Ball\"",
+      "B": "\"NoBall\"",
       "sigma": "0.1"
     }
   }
