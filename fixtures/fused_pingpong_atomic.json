@@ -2,12 +2,12 @@
   "fused_pingpong": {
     "x": {},
     "y": {
-      "send": "string"
+      "send": "std::string"
     },
     "s": {
-      "A": "string",
-      "B": "string",
-      "sigma": "R"
+      "A": "std::string",
+      "B": "std::string",
+      "sigma": "double"
     },
     "delta_int": {
       "A == \"Ball\"": {

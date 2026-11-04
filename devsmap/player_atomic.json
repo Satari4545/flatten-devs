@@ -1,14 +1,14 @@
 {
   "player": {
     "x": {
-      "receive": "string"
+      "receive": "std::string"
     },
     "y": {
-      "send": "string"
+      "send": "std::string"
     },
     "s": {
-      "phase": "string",
-      "sigma": "R"
+      "phase": "std::string",
+      "sigma": "double"
     },
     "delta_int": {
       "otherwise": {

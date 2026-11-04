@@ -153,8 +153,8 @@ atomic (plain text here; your answer uses ```json blocks):
 
     {{"fused_pingpong": {{
       "x": {{}},
-      "y": {{"send": "string"}},
-      "s": {{"A": "string", "B": "string", "sigma": "R"}},
+      "y": {{"send": "std::string"}},
+      "s": {{"A": "std::string", "B": "std::string", "sigma": "double"}},
       "delta_int": {{
         "A == \"Ball\"": {{"A": "\"NoBall\"", "B": "\"Ball\"",
                            "sigma": "0.1"}},

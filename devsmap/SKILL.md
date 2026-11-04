@@ -24,7 +24,7 @@ The DEVS octuple, with exactly these keys:
 `x`, `y`, `s`, `delta_int`, `delta_ext`, `delta_con`, `lambda`, `ta`
 
 - `x`, `y`, `s` map input ports, output ports and state variables to
-  their set, `string` or `R` (real numbers).
+  their C++ type: `double`, `int`, `bool` or `std::string`.
 - `delta_int`, `delta_ext` and `lambda` are condition maps: keys are
   conditions (boolean expressions), values are assignment maps
   `{<target>: <expression>}`. Transitions assign state variables,
@@ -35,12 +35,12 @@ The DEVS octuple, with exactly these keys:
   bottom, so a later expression sees the values assigned before it
   (`{"a": "b", "b": "a"}` sets both to the old `b`).
 - `ta` is exactly `{"otherwise": "<state variable>"}`: the time advance
-  is one state variable of set `R` (e.g. `sigma`). A passive state sets
+  is one `double` state variable (e.g. `sigma`). A passive state sets
   that variable to `inf`.
 - `delta_con` is exactly `{"otherwise": {}}` and always means the
   internal transition, then the external one.
 
-Output values assigned by `lambda` are plain values of the port's set
+Output values assigned by `lambda` are plain values of the port's type
 (e.g. `"ball"`). Never encode a sender or component id inside a value --
 with one exception: a *fused* atomic (the output of closure under
 coupling) MUST prefix each output value with the originating component
@@ -48,14 +48,14 @@ id (`"<id>:<value>"`, e.g. `"P01:ball"`), so component identity survives
 in the observable trace and the verifier can check which component
 emitted each output.
 
-Initial values are constants: for `R` a real number written with a
-decimal point (`"0.1"`, `"-2.0"`) or `"inf"`; for `string` a string
+Initial values are constants: for `double` a real number written with a
+decimal point (`"0.1"`, `"-2.0"`) or `"inf"`; for `std::string` a string
 literal (`"\"Send\""`).
 
 ## Expressions
 
 Expressions are JSON strings. A condition is boolean; an assignment's
-expression has the set of its target. Tokens are separated by spaces
+expression has the type of its target. Tokens are separated by spaces
 only (no tabs or newlines). An expression may use:
 
 - the model's state variables;
@@ -63,10 +63,10 @@ only (no tabs or newlines). An expression may use:
   literal does integer arithmetic in C++);
 - string literals of letters, digits and `_ . : -` (no spaces), e.g.
   `"Send"`;
-- for `R`: `+ - * /`, unary `-`, comparisons `== != < <= > >=`; two
+- for `double`: `+ - * /`, unary `-`, comparisons `== != < <= > >=`; two
   `-` are always separated by a space (`- -c`, `a - -b`: C++ reads
   `--` as its decrement operator);
-- for `string`: `==` and `!=`, with a string variable on at least one
+- for `std::string`: `==` and `!=`, with a string variable on at least one
   side (two literals would compare pointers in C++);
 - for conditions: `&& || !`; parentheses anywhere; at most one
   comparison per operand (`a < b < c` is not allowed);
