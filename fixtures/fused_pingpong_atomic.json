@@ -1,0 +1,42 @@
+{
+  "fused_pingpong": {
+    "x": {},
+    "y": {
+      "send": "string"
+    },
+    "s": {
+      "A": "string",
+      "B": "string",
+      "sigma": "R"
+    },
+    "delta_int": {
+      "A == \"Ball\"": {
+        "A": "\"NoBall\"",
+        "B": "\"Ball\"",
+        "sigma": "0.1"
+      },
+      "otherwise": {
+        "A": "\"Ball\"",
+        "B": "\"NoBall\"",
+        "sigma": "0.1"
+      }
+    },
+    "delta_ext": {
+      "otherwise": {}
+    },
+    "delta_con": {
+      "otherwise": {}
+    },
+    "lambda": {
+      "A == \"Ball\"": {
+        "send": "\"A:ball\""
+      },
+      "otherwise": {
+        "send": "\"B:ball\""
+      }
+    },
+    "ta": {
+      "otherwise": "sigma"
+    }
+  }
+}

@@ -18,7 +18,6 @@ selected provider's API key, model(s) and retries, and FUSE_MAX_ITERS
 import json
 import os
 import re
-import sys
 import tempfile
 import time
 from typing import NamedTuple
@@ -225,45 +224,32 @@ class LLMError(Exception):
 
 class Reference(NamedTuple):
     """The original model's behavior that proposals must reproduce."""
-    events: list     # canonical (time, port, value) events up to horizon;
-                     # for a coupled original the value is sender-prefixed
-                     # ("P01:ball"), so component identity is compared
+    events: list     # observe() events up to horizon
     window: float    # the LLM sees the events up to this time
     horizon: float   # proposals are compared up to this time
 
 
-def canonical(trace, prefix_sender=False):
-    """Sorted (time, port, value) events; order is not compared.
-
-    With prefix_sender the sender is folded into the value as
-    "<sender>:<value>", so *which* component emitted each output is
-    compared. A fused atomic must therefore emit "<id>:<value>" itself;
-    a bare value can no longer pass.
-    """
-    if prefix_sender:
-        return sorted((e["time"], e["port"], f'{e["sender"]}:{e["value"]}')
-                      for e in trace)
-    return sorted((e["time"], e["port"], str(e["value"])) for e in trace)
-
-
 def shown(events, window):
-    """The part of canonical `events` the LLM gets to see."""
+    """The part of observed `events` the LLM gets to see."""
     return [e for e in events if e[0] <= window]
 
 
 def observe(path, horizon):
-    """Canonical events of the model at `path` up to t = horizon.
+    """Sorted (time, port, value) events of the model at `path` up to
+    t = horizon; order is not compared.
 
-    For a coupled model the sender is folded into the value
-    ("P01:ball"), so the reference records which component emitted each
-    output. An atomic model is compared on its emitted values as-is --
-    which is what forces a fused atomic to emit "<id>:<value>" itself.
+    For a coupled model the sender is folded into the value ("P01:ball"),
+    so which component emitted each output is compared. An atomic model
+    is compared on its values as-is, so a fused atomic must emit
+    "<id>:<value>" itself.
     """
+    coupled = devsmap.load_model(path)["kind"] == "coupled"
     # Run past the horizon and cut on rounded times, so float drift in the
     # end time cuts the reference and every proposal the same way.
-    kind = devsmap.load_model(path)["kind"]
     trace = cadmium_api.simulate(path, horizon + SLACK)
-    events = canonical(trace, prefix_sender=(kind == "coupled"))
+    events = sorted((e["time"], e["port"],
+                     f'{e["sender"]}:{e["value"]}' if coupled else e["value"])
+                    for e in trace)
     return [e for e in events if e[0] <= horizon]
 
 
@@ -340,11 +326,11 @@ def build_prompt(model, reference):
     )
 
 
-def load_env_file(path=ENV_FILE):
+def load_env_file():
     """Load KEY=VALUE lines from .env without adding a dependency."""
-    if not os.path.exists(path):
+    if not os.path.exists(ENV_FILE):
         return
-    with open(path, encoding="utf-8") as f:
+    with open(ENV_FILE, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith("#") or "=" not in line:
@@ -402,11 +388,6 @@ def _event_text(event):
         value = getattr(event, attr, None)
         if isinstance(value, str) and value:
             return value
-    if isinstance(event, dict):
-        for key in ("output_text", "text", "delta"):
-            value = event.get(key)
-            if isinstance(value, str) and value:
-                return value
     return ""
 
 
@@ -533,7 +514,7 @@ def fenced(text):
 
 
 def trace_diff(got, expected, limit=3):
-    """Mismatch report on canonical traces: counts + first differences."""
+    """Mismatch report on observed traces: counts + first differences."""
     lines = [f"trace mismatch: got {len(got)} events, "
              f"expected {len(expected)}"]
     for i in range(max(len(got), len(expected))):
@@ -632,14 +613,3 @@ def fuse(coupled_path, out_dir=OUT_DIR):
     print(f"fuse: no accepted model after {max_iters} attempts; "
           f"last reason: {reason}")
     return 1
-
-
-if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        sys.exit("usage: python fuse.py <name>_coupled.json")
-    # A console that cannot encode a character shows "?" instead of failing.
-    sys.stdout.reconfigure(errors="replace")
-    try:
-        sys.exit(fuse(sys.argv[1]))
-    except (ValueError, cadmium_api.CadmiumError, LLMError) as exc:
-        sys.exit(f"fuse: {exc}")
