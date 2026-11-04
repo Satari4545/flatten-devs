@@ -1,11 +1,10 @@
 # DEVSMap atomic models
 
 How to write a DEVSMap atomic model (Govind, Cardenas & Wainer, "DEVSMAP:
-On the Path of Standardized DEVS Model Representation") that this
-project's loader (`devsmap.py`) accepts and the DEVSMap_to_Cadmium
-generator translates correctly. Models are not validated: a model outside
-these rules fails in the generator, the C++ compiler or the simulation,
-with that tool's output as the error.
+On the Path of Standardized DEVS Model Representation") that the
+DEVSMap_to_Cadmium generator translates correctly. Proposals are not
+checked up front: breaking these rules fails in the generator, the C++
+compiler or the simulation, and that tool's output comes back as the error.
 
 ## Files
 
@@ -16,8 +15,7 @@ An atomic model named `<name>` is two files:
 - `<name>_init_state.json`: `{"init_states": {"<name>": {"<var>": "<value>"}}}`,
   setting every state variable and nothing else.
 
-No object repeats a key. The atomic file never sets initial state (there
-is no `"initial"` key).
+The atomic file never sets initial state (there is no `"initial"` key).
 
 ## Model body
 
@@ -43,7 +41,12 @@ The DEVS octuple, with exactly these keys:
   internal transition, then the external one.
 
 Output values assigned by `lambda` are plain values of the port's set
-(e.g. `"ball"`). Never encode a sender or component id inside a value.
+(e.g. `"ball"`). Never encode a sender or component id inside a value --
+with one exception: a *fused* atomic (the output of closure under
+coupling) MUST prefix each output value with the originating component
+id (`"<id>:<value>"`, e.g. `"P01:ball"`), so component identity survives
+in the observable trace and the verifier can check which component
+emitted each output.
 
 Initial values are constants: for `R` a real number written with a
 decimal point (`"0.1"`, `"-2.0"`) or `"inf"`; for `string` a string
