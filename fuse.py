@@ -193,6 +193,10 @@ Rules:
   (the reachability invariants), Phase 3 (the mapping, then the atomic
   document in ONE ```json block and the init-state document in a second
   ```json block). No other code blocks in your answer.
+- End each phase with one line giving its state count, exact or
+  estimated, counting discrete states (leave continuous clocks out),
+  e.g. "Phase 1: 2^100 states", "Phase 2: 100 states",
+  "Phase 3: 100 states".
 
 Raw DEVSMap files:
 
