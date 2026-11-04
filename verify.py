@@ -215,7 +215,7 @@ def check_fuse_loop(folder):
                     broken_reply(), fusion_reply()])
     prompts = []
 
-    def llm(prompt):
+    def llm(prompt, settings):
         prompts.append(prompt)
         return next(replies)
 
@@ -224,7 +224,6 @@ def check_fuse_loop(folder):
     with mock.patch.dict(os.environ, {"FUSE_MAX_ITERS": "3"}), \
             mock.patch.object(fuse, "llm_settings"), \
             mock.patch.object(fuse, "call_llm", llm), \
-\
             contextlib.redirect_stdout(log):
         code = fuse.fuse(COUPLED, out_dir)
         quiet = write_model(folder, "quiet", timer_body(
