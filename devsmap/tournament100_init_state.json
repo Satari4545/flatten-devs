@@ -1,0 +1,406 @@
+{
+  "init_states": {
+    "tournament100": {
+      "P001": {
+        "phase": "\"Send\"",
+        "sigma": "0.1"
+      },
+      "P002": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P003": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P004": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P005": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P006": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P007": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P008": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P009": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P010": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P011": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P012": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P013": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P014": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P015": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P016": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P017": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P018": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P019": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P020": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P021": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P022": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P023": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P024": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P025": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P026": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P027": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P028": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P029": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P030": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P031": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P032": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P033": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P034": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P035": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P036": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P037": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P038": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P039": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P040": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P041": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P042": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P043": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P044": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P045": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P046": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P047": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P048": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P049": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P050": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P051": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P052": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P053": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P054": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P055": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P056": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P057": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P058": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P059": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P060": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P061": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P062": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P063": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P064": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P065": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P066": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P067": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P068": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P069": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P070": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P071": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P072": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P073": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P074": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P075": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P076": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P077": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P078": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P079": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P080": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P081": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P082": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P083": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P084": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P085": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P086": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P087": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P088": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P089": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P090": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P091": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P092": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P093": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P094": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P095": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P096": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P097": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P098": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P099": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      },
+      "P100": {
+        "phase": "\"Wait\"",
+        "sigma": "inf"
+      }
+    }
+  }
+}

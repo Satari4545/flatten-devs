@@ -1,0 +1,714 @@
+{
+  "tournament100": {
+    "x": {},
+    "y": {},
+    "components": {
+      "player": [
+        "P001",
+        "P002",
+        "P003",
+        "P004",
+        "P005",
+        "P006",
+        "P007",
+        "P008",
+        "P009",
+        "P010",
+        "P011",
+        "P012",
+        "P013",
+        "P014",
+        "P015",
+        "P016",
+        "P017",
+        "P018",
+        "P019",
+        "P020",
+        "P021",
+        "P022",
+        "P023",
+        "P024",
+        "P025",
+        "P026",
+        "P027",
+        "P028",
+        "P029",
+        "P030",
+        "P031",
+        "P032",
+        "P033",
+        "P034",
+        "P035",
+        "P036",
+        "P037",
+        "P038",
+        "P039",
+        "P040",
+        "P041",
+        "P042",
+        "P043",
+        "P044",
+        "P045",
+        "P046",
+        "P047",
+        "P048",
+        "P049",
+        "P050",
+        "P051",
+        "P052",
+        "P053",
+        "P054",
+        "P055",
+        "P056",
+        "P057",
+        "P058",
+        "P059",
+        "P060",
+        "P061",
+        "P062",
+        "P063",
+        "P064",
+        "P065",
+        "P066",
+        "P067",
+        "P068",
+        "P069",
+        "P070",
+        "P071",
+        "P072",
+        "P073",
+        "P074",
+        "P075",
+        "P076",
+        "P077",
+        "P078",
+        "P079",
+        "P080",
+        "P081",
+        "P082",
+        "P083",
+        "P084",
+        "P085",
+        "P086",
+        "P087",
+        "P088",
+        "P089",
+        "P090",
+        "P091",
+        "P092",
+        "P093",
+        "P094",
+        "P095",
+        "P096",
+        "P097",
+        "P098",
+        "P099",
+        "P100"
+      ]
+    },
+    "eic": [],
+    "eoc": [],
+    "ic": [
+      {
+        "component_from": "P001",
+        "port_from": "send",
+        "component_to": "P002",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P002",
+        "port_from": "send",
+        "component_to": "P003",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P003",
+        "port_from": "send",
+        "component_to": "P004",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P004",
+        "port_from": "send",
+        "component_to": "P005",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P005",
+        "port_from": "send",
+        "component_to": "P006",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P006",
+        "port_from": "send",
+        "component_to": "P007",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P007",
+        "port_from": "send",
+        "component_to": "P008",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P008",
+        "port_from": "send",
+        "component_to": "P009",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P009",
+        "port_from": "send",
+        "component_to": "P010",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P010",
+        "port_from": "send",
+        "component_to": "P011",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P011",
+        "port_from": "send",
+        "component_to": "P012",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P012",
+        "port_from": "send",
+        "component_to": "P013",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P013",
+        "port_from": "send",
+        "component_to": "P014",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P014",
+        "port_from": "send",
+        "component_to": "P015",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P015",
+        "port_from": "send",
+        "component_to": "P016",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P016",
+        "port_from": "send",
+        "component_to": "P017",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P017",
+        "port_from": "send",
+        "component_to": "P018",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P018",
+        "port_from": "send",
+        "component_to": "P019",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P019",
+        "port_from": "send",
+        "component_to": "P020",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P020",
+        "port_from": "send",
+        "component_to": "P021",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P021",
+        "port_from": "send",
+        "component_to": "P022",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P022",
+        "port_from": "send",
+        "component_to": "P023",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P023",
+        "port_from": "send",
+        "component_to": "P024",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P024",
+        "port_from": "send",
+        "component_to": "P025",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P025",
+        "port_from": "send",
+        "component_to": "P026",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P026",
+        "port_from": "send",
+        "component_to": "P027",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P027",
+        "port_from": "send",
+        "component_to": "P028",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P028",
+        "port_from": "send",
+        "component_to": "P029",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P029",
+        "port_from": "send",
+        "component_to": "P030",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P030",
+        "port_from": "send",
+        "component_to": "P031",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P031",
+        "port_from": "send",
+        "component_to": "P032",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P032",
+        "port_from": "send",
+        "component_to": "P033",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P033",
+        "port_from": "send",
+        "component_to": "P034",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P034",
+        "port_from": "send",
+        "component_to": "P035",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P035",
+        "port_from": "send",
+        "component_to": "P036",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P036",
+        "port_from": "send",
+        "component_to": "P037",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P037",
+        "port_from": "send",
+        "component_to": "P038",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P038",
+        "port_from": "send",
+        "component_to": "P039",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P039",
+        "port_from": "send",
+        "component_to": "P040",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P040",
+        "port_from": "send",
+        "component_to": "P041",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P041",
+        "port_from": "send",
+        "component_to": "P042",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P042",
+        "port_from": "send",
+        "component_to": "P043",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P043",
+        "port_from": "send",
+        "component_to": "P044",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P044",
+        "port_from": "send",
+        "component_to": "P045",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P045",
+        "port_from": "send",
+        "component_to": "P046",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P046",
+        "port_from": "send",
+        "component_to": "P047",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P047",
+        "port_from": "send",
+        "component_to": "P048",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P048",
+        "port_from": "send",
+        "component_to": "P049",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P049",
+        "port_from": "send",
+        "component_to": "P050",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P050",
+        "port_from": "send",
+        "component_to": "P051",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P051",
+        "port_from": "send",
+        "component_to": "P052",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P052",
+        "port_from": "send",
+        "component_to": "P053",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P053",
+        "port_from": "send",
+        "component_to": "P054",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P054",
+        "port_from": "send",
+        "component_to": "P055",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P055",
+        "port_from": "send",
+        "component_to": "P056",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P056",
+        "port_from": "send",
+        "component_to": "P057",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P057",
+        "port_from": "send",
+        "component_to": "P058",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P058",
+        "port_from": "send",
+        "component_to": "P059",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P059",
+        "port_from": "send",
+        "component_to": "P060",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P060",
+        "port_from": "send",
+        "component_to": "P061",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P061",
+        "port_from": "send",
+        "component_to": "P062",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P062",
+        "port_from": "send",
+        "component_to": "P063",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P063",
+        "port_from": "send",
+        "component_to": "P064",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P064",
+        "port_from": "send",
+        "component_to": "P065",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P065",
+        "port_from": "send",
+        "component_to": "P066",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P066",
+        "port_from": "send",
+        "component_to": "P067",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P067",
+        "port_from": "send",
+        "component_to": "P068",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P068",
+        "port_from": "send",
+        "component_to": "P069",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P069",
+        "port_from": "send",
+        "component_to": "P070",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P070",
+        "port_from": "send",
+        "component_to": "P071",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P071",
+        "port_from": "send",
+        "component_to": "P072",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P072",
+        "port_from": "send",
+        "component_to": "P073",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P073",
+        "port_from": "send",
+        "component_to": "P074",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P074",
+        "port_from": "send",
+        "component_to": "P075",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P075",
+        "port_from": "send",
+        "component_to": "P076",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P076",
+        "port_from": "send",
+        "component_to": "P077",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P077",
+        "port_from": "send",
+        "component_to": "P078",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P078",
+        "port_from": "send",
+        "component_to": "P079",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P079",
+        "port_from": "send",
+        "component_to": "P080",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P080",
+        "port_from": "send",
+        "component_to": "P081",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P081",
+        "port_from": "send",
+        "component_to": "P082",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P082",
+        "port_from": "send",
+        "component_to": "P083",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P083",
+        "port_from": "send",
+        "component_to": "P084",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P084",
+        "port_from": "send",
+        "component_to": "P085",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P085",
+        "port_from": "send",
+        "component_to": "P086",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P086",
+        "port_from": "send",
+        "component_to": "P087",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P087",
+        "port_from": "send",
+        "component_to": "P088",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P088",
+        "port_from": "send",
+        "component_to": "P089",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P089",
+        "port_from": "send",
+        "component_to": "P090",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P090",
+        "port_from": "send",
+        "component_to": "P091",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P091",
+        "port_from": "send",
+        "component_to": "P092",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P092",
+        "port_from": "send",
+        "component_to": "P093",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P093",
+        "port_from": "send",
+        "component_to": "P094",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P094",
+        "port_from": "send",
+        "component_to": "P095",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P095",
+        "port_from": "send",
+        "component_to": "P096",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P096",
+        "port_from": "send",
+        "component_to": "P097",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P097",
+        "port_from": "send",
+        "component_to": "P098",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P098",
+        "port_from": "send",
+        "component_to": "P099",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P099",
+        "port_from": "send",
+        "component_to": "P100",
+        "port_to": "receive"
+      },
+      {
+        "component_from": "P100",
+        "port_from": "send",
+        "component_to": "P001",
+        "port_to": "receive"
+      }
+    ]
+  }
+}
