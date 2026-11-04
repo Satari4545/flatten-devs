@@ -6,7 +6,5 @@ pingpong
 .env
 .env.*
 !.env.example
-fused_proposal.py
-trace.json
 devsmap/out/
 build/

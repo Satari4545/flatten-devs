@@ -53,9 +53,10 @@ def load_model(path):
         raise ValueError(f"{os.path.basename(path)}: models nested too "
                          f"deeply (does a coupled model contain "
                          f"itself?)") from None
-    filename = f"{model['name']}_init_state.json"
-    with _reading(filename):
-        model["init"] = _read_init(model, filename)
+    model["init_path"] = os.path.join(os.path.dirname(model["path"]),
+                                      f"{model['name']}_init_state.json")
+    with _reading(os.path.basename(model["init_path"])):
+        model["init"] = _read_init(model)
     return model
 
 
@@ -92,8 +93,8 @@ def _load(path):
     return model
 
 
-def _read_init(model, filename):
-    doc = _read_json(os.path.join(os.path.dirname(model["path"]), filename))
+def _read_init(model):
+    doc = _read_json(model["init_path"])
     init = {}
 
     def walk(m, node, path):
