@@ -10,6 +10,7 @@ import json
 import os
 
 _KINDS = ("atomic", "coupled")
+_IGNORED_KEYS = ("include_sets", "parameters")  # the paper's, not models
 
 
 @contextlib.contextmanager
@@ -40,10 +41,12 @@ def write_json(path, doc):
 
 def model_name(doc, where):
     """The one model key of a parsed DEVSMap document."""
-    if not isinstance(doc, dict) or len(doc) != 1:
+    names = ([k for k in doc if k not in _IGNORED_KEYS]
+             if isinstance(doc, dict) else [])
+    if len(names) != 1:
         raise ValueError(f"{where}: expected exactly one top-level key, "
                          f"the model name")
-    return next(iter(doc))
+    return names[0]
 
 
 def load_model(path):

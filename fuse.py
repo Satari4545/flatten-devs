@@ -10,6 +10,10 @@ Traces compare as (time, port, value) multisets. The LLM sees the first
 SHOWN_EVENTS events; comparison runs HIDDEN_FACTOR times longer, so replaying
 the shown events is not enough.
 
+An open model (one with ports) has no reference run, as the generator cannot
+drive ports: a proposal must keep its ports and compile, and is written with
+its generated C++ header.
+
 Environment (also read from .env): LLM_PROVIDER (gemini or openai), the
 selected provider's API key, model(s) and retries, and FUSE_MAX_ITERS
 (LLM rounds, default 3).
@@ -18,6 +22,7 @@ selected provider's API key, model(s) and retries, and FUSE_MAX_ITERS
 import json
 import os
 import re
+import shutil
 import tempfile
 import time
 from collections import Counter
@@ -37,6 +42,8 @@ MIN_HORIZON = 20.0     # and at least up to this time, doubled until every
                        # sender has emitted twice (up to 3x MAX_HORIZON)
 MAX_HORIZON = 1000.0   # the window ends by this time
 MAX_OUTPUT_TOKENS = 100_000
+OPENAI_REASONING_EFFORT = "xhigh"
+OPENAI_TIMEOUT = 3600  # longest silence on the stream (reasoning sends none)
 SLACK = 1e-6           # runs end this far past the time they are cut at
 REPLY_LIMIT = 1500     # chars of a json-less reply sent back
 
@@ -185,13 +192,7 @@ Rules:
 - The fused model is TWO documents: a <name>_atomic.json and its
   <name>_init_state.json. Pick one model name and use it in both.
 - No JSON object may repeat a key (e.g. two "otherwise" branches).
-- Reproduce every output event of the original's atomic components, also
-  the ones that only travel along internal couplings, as
-  (time, port, "<component_id>:<value>"). This is the coupled model's
-  trace in Cadmium until t = {window}:
-{expected}
-- The verifier keeps comparing after t = {window}, so reproduce the
-  behavior, not just the listed events.
+{trace_rules}
 - State-variable rules are in Phase 3; follow them.
 - Answer in three parts: Phase 1 (the construction, in words), Phase 2
   (the reachability invariants), Phase 3 (the mapping, then the atomic
@@ -211,6 +212,25 @@ Flattened summary:
 {summary}
 ```
 """
+
+# The Rules bullets on the reference trace (closed model) or its absence
+# (open model).
+TRACE_RULES = """\
+- Reproduce every output event of the original's atomic components, also
+  the ones that only travel along internal couplings, as
+  (time, port, "<component_id>:<value>"). This is the coupled model's
+  trace in Cadmium until t = {window}:
+{expected}
+- The verifier keeps comparing after t = {window}, so reproduce the
+  behavior, not just the listed events."""
+
+NO_TRACE_RULES = """\
+- This coupled model has input and output ports, so it is not simulated
+  and there is no reference trace: your proposal is checked only by
+  generating its C++ and compiling it against the model's own headers.
+  Everything above still applies, except the `<component_id>:<value>`
+  rule: `lambda` emits plain values of each output port's type, exactly
+  what the coupled model sends out through its external output couplings."""
 
 FEEDBACK = """
 ---
@@ -242,6 +262,15 @@ class Reference(NamedTuple):
 def shown(events, window):
     """The part of observed `events` the LLM gets to see."""
     return [e for e in events if e[0] <= window]
+
+
+def _ports(model):
+    return {k: model["body"].get(k, {}) for k in ("x", "y")}
+
+
+def is_open(model):
+    """Whether a loaded model is coupled and has ports."""
+    return model["kind"] == "coupled" and any(_ports(model).values())
 
 
 def _is_coupled(path):
@@ -339,15 +368,20 @@ def raw_file(path):
 
 
 def build_prompt(model, reference):
+    """The first prompt; `reference` is None for an open model."""
     with open(DEVSMAP_SPEC, encoding="utf-8") as f:
         spec = f.read()
     paths = model_files(model) + [model["init_path"]]
-    expected = [{"time": t, "port": p, "value": v}
-                for t, p, v in shown(reference.events, reference.window)]
+    if reference is None:
+        rules = NO_TRACE_RULES
+    else:
+        expected = [{"time": t, "port": p, "value": v}
+                    for t, p, v in shown(reference.events, reference.window)]
+        rules = TRACE_RULES.format(window=reference.window,
+                                   expected=json.dumps(expected, indent=2))
     return PROMPT.format(
         devsmap_spec=spec,
-        window=reference.window,
-        expected=json.dumps(expected, indent=2),
+        trace_rules=rules,
         raw_files="\n\n".join(raw_file(p) for p in paths),
         summary=devsmap_flatten.flattened_summary(model),
     )
@@ -467,12 +501,30 @@ def call_llm(prompt, settings):
         except ImportError:
             raise LLMError("install the OpenAI SDK first: "
                            "pip install -U openai") from None
-        client = OpenAI(api_key=key, max_retries=0)
-        return _with_retries("OpenAI", models, retries, lambda model:
-                             client.responses.create(
-                                 model=model, input=prompt,
-                                 max_output_tokens=MAX_OUTPUT_TOKENS
-                             ).output_text)
+        client = OpenAI(api_key=key, max_retries=0, timeout=OPENAI_TIMEOUT)
+
+        def ask(model):
+            response = None
+            with client.responses.create(
+                    model=model, input=prompt,
+                    reasoning={"effort": OPENAI_REASONING_EFFORT},
+                    max_output_tokens=MAX_OUTPUT_TOKENS, stream=True) as events:
+                for event in events:
+                    print(".", end="", flush=True)  # progress only
+                    if event.type in ("response.completed",
+                                      "response.incomplete", "response.failed"):
+                        response = event.response
+            if response is None:
+                raise RuntimeError("the stream ended without a final response")
+            if response.status == "failed":
+                error = getattr(response.error, "message", None)
+                raise RuntimeError(f"failed reply ({error})")
+            if response.status == "incomplete":
+                reason = getattr(response.incomplete_details, "reason", None)
+                raise RuntimeError(f"incomplete reply ({reason})")
+            return response.output_text
+
+        return _with_retries("OpenAI", models, retries, ask)
     try:
         from google import genai
     except ImportError:
@@ -577,8 +629,26 @@ def verify(path, reference):
                    f"not the listed events")
 
 
-def accept(path, docs, original, reason, out_dir):
-    """Report an accepted proposal and write it to a new dir in out_dir."""
+def verify_open(path, coupled):
+    """(ok, reason): does the atomic at `path` keep the open `coupled`
+    model's ports and compile? On success its generated <name>.hpp is
+    copied next to it."""
+    ports = _ports(coupled)
+    try:
+        fused = devsmap.load_model(path)
+        if not isinstance(fused["body"], dict) or _ports(fused) != ports:
+            return False, (f"x and y must be exactly the coupled model's "
+                           f"(port names and C++ types): {json.dumps(ports)}")
+        header = cadmium_api.check(path)
+    except (ValueError, cadmium_api.CadmiumError) as exc:
+        return False, str(exc)
+    shutil.copy(header, os.path.dirname(path))
+    return True, f"{os.path.basename(header)} compiles"
+
+
+def accept(path, original, reason, out_dir):
+    """Report an accepted proposal and copy its folder to a new dir in
+    out_dir."""
     fused = devsmap.load_model(path)
     states, branches = model_size(fused)
     orig_states, orig_branches = model_size(original)
@@ -590,9 +660,12 @@ def accept(path, docs, original, reason, out_dir):
               "components")
     os.makedirs(out_dir, exist_ok=True)
     folder = tempfile.mkdtemp(prefix=f"{fused['name']}-", dir=out_dir)
-    write_proposal(folder, *docs)
-    print(f"fuse: wrote {fused['name']}_atomic.json + "
-          f"{fused['name']}_init_state.json to {folder}")
+    shutil.copytree(os.path.dirname(path), folder, dirs_exist_ok=True)
+    print(f"fuse: wrote {' + '.join(sorted(os.listdir(folder)))} to "
+          f"{folder}")
+    if is_open(original):
+        print("fuse: the proposal was compiled but NOT simulated; verify "
+              "it in the target model's own test harness")
 
 
 def fuse(coupled_path, out_dir=OUT_DIR):
@@ -605,12 +678,17 @@ def fuse(coupled_path, out_dir=OUT_DIR):
     load_env_file()
     max_iters = env_int("FUSE_MAX_ITERS", 3)
     settings = llm_settings()
-    print(f"fuse: running {model['name']} in Cadmium for the reference "
-          f"trace...")
-    reference = reference_run(coupled_path)
-    print(f"fuse: {len(shown(reference.events, reference.window))} "
-          f"reference events up to t = {reference.window} shown to the LLM; "
-          f"proposals are compared up to t = {reference.horizon}")
+    if is_open(model):
+        reference = None
+        print(f"fuse: {model['name']} has ports, so there is no reference "
+              f"run; proposals are compiled, not simulated")
+    else:
+        print(f"fuse: running {model['name']} in Cadmium for the reference "
+              f"trace...")
+        reference = reference_run(coupled_path)
+        print(f"fuse: {len(shown(reference.events, reference.window))} "
+              f"reference events up to t = {reference.window} shown to the "
+              f"LLM; proposals are compared up to t = {reference.horizon}")
     base = build_prompt(model, reference)
     prompt, proposal, reason = base, None, None
 
@@ -633,9 +711,10 @@ def fuse(coupled_path, out_dir=OUT_DIR):
                 except (ValueError, OSError) as exc:
                     reason = f"unusable proposal: {exc}"
                 else:
-                    ok, reason = verify(path, reference)
+                    ok, reason = (verify_open(path, model) if reference is None
+                                  else verify(path, reference))
                     if ok:
-                        accept(path, docs, model, reason, out_dir)
+                        accept(path, model, reason, out_dir)
                         return 0
             print(f"fuse: REJECTED - {reason}")
             prompt = base + FEEDBACK.format(proposal=fenced(proposal.strip()),

@@ -8,7 +8,8 @@ equivalence by simulation. Input and output are DEVSMap (Govind, Cárdenas
 Representation"):
 
     coupled-model DEVSMap in  ->  DEVSMap atomic model out,
-    accepted only if Cadmium runs both to the same output trace.
+    accepted only if Cadmium runs both to the same output trace
+    (for open models, see "Open models").
 
 Users are DEVS practitioners, so the emitted DEVSMap follows the paper as
 closely as possible.
@@ -19,21 +20,22 @@ closely as possible.
 |---|---|
 | `devsmap.py` | Loads a model, its component models and initial states (no validation; an unreadable file is a `ValueError` naming it). `write_json` is the one JSON writer. |
 | `devsmap_flatten.py` | Dissolves nesting into leaf atomics and leaf-to-leaf couplings; writes the text summary the LLM gets. Exact, no AI. |
-| `cadmium_api.py` | `simulate(path, end_time)`: stages the model for the DEVSMap generator, compiles the generated `main.cpp` against Cadmium, runs it and parses the CSVLogger trace (`logfile.csv`). Failures are `CadmiumError` with that step's output. |
+| `cadmium_api.py` | `simulate(path, end_time)`: stages the model for the DEVSMap generator, compiles the generated `main.cpp` against Cadmium, runs it and parses the CSVLogger trace (`logfile.csv`). `check(path)` only generates and compiles. Failures are `CadmiumError` with that step's output. |
 | `fuse.py` | Reference run, prompt, LLM call, verify loop. |
 | `main.py` | Command line. |
 | `verify.py` | Check suite; the LLM is replaced by canned replies. |
 
 Nothing validates models. A bad user model or LLM proposal fails in the
 generator, g++ or the simulation, and for a proposal that error goes back
-to the LLM like a trace mismatch. The trace comparison is the check.
+to the LLM like a trace mismatch. The trace comparison (open models: the
+compile) is the check.
 
 The LLM gets the raw DEVSMap files, the flattened summary,
 `devsmap/SKILL.md` (the atomic-model rules) and the start of the
-reference trace. The prompt asks for three phases: the closure paper's
-construction, reduction by reachability, then a minimal atomic with one
-state variable per component. A flatten bug cannot fake a pass: the
-reference comes from running the original model in Cadmium.
+reference trace, if any. The prompt asks for three phases: the closure
+paper's construction, reduction by reachability, then a minimal atomic
+with one state variable per component. A flatten bug cannot fake a pass:
+the reference comes from running the original model in Cadmium.
 
 ## What an accepted fusion proves
 
@@ -65,21 +67,31 @@ horizon. It does not cover behavior after the horizon or from other
 initial states, input ports (nothing drives them), or bugs shared by both
 runs (same generator and Cadmium).
 
+## Open models
+
+A coupled model with ports (`x` or `y`) is open. The generator cannot
+drive ports, so there is no reference run and outputs carry no `<id>:`
+prefix. A proposal must keep the coupled model's `x` and `y` and compile
+(`cadmium_api.check`); it is written with its generated `<name>.hpp`,
+never simulated. Pass the model's own C++ headers with `--header` and
+`-I` (see Usage); `CXXFLAGS` takes any other compiler flag. `--header`
+can point at a small header of named functions that includes the model's
+own headers (e.g. `devsmap/<model>_functions.hpp`).
+
 ## Cadmium backend
 
 - Generator: github.com/HazelGriffith/DEVSMap_to_Cadmium_Generator,
-  submodule `third_party/devsmap_generator`, run unpatched. It handles
-  only internal couplings (no EIC/EOC) and no `delta_con`; an atomic
-  model runs as component `top` of a generated coupled model `wrapper`.
+  submodule `third_party/devsmap_generator`, pinned to its unmerged
+  `per-instance-initial-states` branch. It handles only internal
+  couplings (no EIC/EOC); an atomic model runs as component `top` of a
+  generated coupled model `wrapper`.
 - Cadmium: submodule `cadmium_v2`, branch `dev-rt`.
-- Compile: `g++ -std=c++17 -O1`, plus `-static` on Windows.
+- Compile: `g++ -std=c++17 -O1`, plus `-static` on Windows, then
+  `CXXFLAGS`.
 - Each run replaces `build/<model name>/`: `stage/` (generator inputs),
   `cpp/` (generated C++), `trace.csv` (simulation log).
 - No event cap: a runaway model (e.g. zero time advance) stops at
   `DEVS_SIM_TIMEOUT`.
-
-Known limitation: the unpatched generator fails on ping-pong, so
-`--check` and fusing ping-pong fail until its fixes land upstream.
 
 ## Model format
 
@@ -97,7 +109,8 @@ prompt. The rest:
   "<value>"}}}}`). Atomic files carry no `initial`, so a fused model is
   two files.
 - The paper's `_experiment`, `_param`, `_metadata` and `_definitions`
-  files are not used; `cadmium_api` writes the experiment file per run.
+  files and top-level `include_sets` and `parameters` keys are not used;
+  `cadmium_api` writes the experiment file per run.
 
 ## Setup
 
@@ -115,8 +128,14 @@ MinGW-w64 from MSYS2) and Python >= 3.10.
 ## Usage
 
     python main.py <name>_coupled.json   # fuse, e.g. devsmap/pingpong_coupled.json
+    python main.py <name>_coupled.json --header C:/path/to/repo/include/model.hpp -I C:/path/to/repo/include
+                                         # fuse against a repo's C++ headers
     python main.py --check               # full check suite
     python main.py --selftest            # only the fuse verifier check
+
+`--header FILE` is force-included (g++ `-include`) and `-I DIR`
+(repeatable) adds a header search directory; both are appended to
+`CXXFLAGS` and need a model path.
 
 | Exit | When |
 |---|---|
@@ -134,6 +153,7 @@ MinGW-w64 from MSYS2) and Python >= 3.10.
 | `FUSE_MAX_ITERS` | 3 | fuse |
 | `CXX` | `g++` | backend |
 | `CADMIUM_INCLUDE` | `cadmium_v2/include` | backend |
+| `CXXFLAGS` | none | backend; POSIX quoting, so paths use `/` |
 | `DEVS_SIM_TIMEOUT` | 60 s per simulation | backend |
 
 `fuse` loads `.env` into the environment (set variables win);
@@ -161,9 +181,10 @@ In dependency order.
 ### 1 Upstream the generator fixes
 
 Get the saved fix (per-instance initial states for multi-instance
-components) merged into James's generator and bump the
-`third_party/devsmap_generator` pin; ping-pong and `--check` then pass.
-The same PR switches his `main.cpp` to `CSVLogger` (`logfile.csv`).
+components) merged into James's generator and repin
+`third_party/devsmap_generator` to his main. The same PR switches his
+`main.cpp` to `CSVLogger` (`logfile.csv`) and adds `bag(i)` for i >= 0
+and `delta_con`.
 
 ### 2 Close the remaining generator gaps
 
@@ -173,13 +194,13 @@ Also upstream, each needed by a later item:
   models (4).
 - **Init states per nesting level**: check that a nested component gets
   its state from the hierarchical init file, and fix it if not.
-- **`delta_con` and multi-branch `ta`**: SKILL.md forbids them until the
-  generator translates them.
+- **Multi-branch `ta`**: SKILL.md forbids it until the generator
+  translates it.
 
 ### 3 Open models: input scripts
 
-Needs 2. Today nothing drives input ports, so only closed models are
-checked. Generate input scripts and feed the same script to the original
+Needs 2. Today nothing drives input ports, so open models are only
+compiled. Generate input scripts and feed the same script to the original
 and the proposal: cases from the model's ports and value sets, seeded
 random scripts (the seed is logged), inputs exactly on internal event
 times (exercises `delta_con`), bursts, and the empty script. Each input
