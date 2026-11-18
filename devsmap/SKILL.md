@@ -24,21 +24,25 @@ The DEVS octuple, with exactly these keys:
 `x`, `y`, `s`, `delta_int`, `delta_ext`, `delta_con`, `lambda`, `ta`
 
 - `x`, `y`, `s` map input ports, output ports and state variables to
-  their C++ type: `double`, `int`, `bool` or `std::string`.
+  their C++ type: `double`, `int`, `bool` or `std::string`, or a type
+  the coupled model already uses (see "Other C++ types").
 - `delta_int`, `delta_ext` and `lambda` are condition maps: keys are
   conditions (boolean expressions), values are assignment maps
   `{<target>: <expression>}`. Transitions assign state variables,
-  `lambda` assigns output ports. Every condition map ends with the
-  mandatory `"otherwise"` entry; branches are tried top to bottom and
-  the first match wins. An empty assignment map `{}` means "no change"
+  `lambda` assigns output ports. A condition map has at least one
+  branch; branches are tried top to bottom and the first match wins.
+  An optional `"otherwise"` entry (at most one, last) is the `else`.
+  An empty assignment map `{}`, or no matching branch, means "no change"
   (for `lambda`, "no output"). The assignments of a branch run top to
   bottom, so a later expression sees the values assigned before it
   (`{"a": "b", "b": "a"}` sets both to the old `b`).
 - `ta` is exactly `{"otherwise": "<state variable>"}`: the time advance
   is one `double` state variable (e.g. `sigma`). A passive state sets
   that variable to `inf`.
-- `delta_con` is exactly `{"otherwise": {}}` and always means the
-  internal transition, then the external one.
+- `delta_con` is `{"otherwise": {}}` for the default (the internal
+  transition, then the external one), or else a condition map like
+  `delta_ext`, used when an input arrives exactly when the model is
+  imminent.
 
 Output values assigned by `lambda` are plain values of the port's type
 (e.g. `"ball"`). Never encode a sender or component id inside a value --
@@ -70,22 +74,43 @@ only (no tabs or newlines). An expression may use:
   side (two literals would compare pointers in C++);
 - for conditions: `&& || !`; parentheses anywhere; at most one
   comparison per operand (`a < b < c` is not allowed);
-- `e` (elapsed time since the last transition), only in `delta_ext`;
+- `e` (elapsed time since the last transition), only in `delta_ext` and
+  `delta_con`;
 - `inf` (infinity), only as a whole value: an initial value or the
   entire right-hand side of a `delta_int` assignment (`"sigma": "inf"`);
-- input ports, only in `delta_ext` and only through the bag operators,
+- input ports, only in `delta_ext` and `delta_con`, and only through the
+  bag operators,
   written exactly `p.bagSize() != 0` or `p.bagSize() == 0` (in
-  conditions) and `p.bag(-1)` (the most recent value, in assignments).
-  A branch reads `p.bag(-1)` only when `p` surely holds a value: `p` is
-  the model's only input port, or the branch's condition has
-  `p.bagSize() != 0` as a top-level `&&` term (not negated, not in
-  parentheses, no `||` outside parentheses), e.g.
+  conditions) and `p.bag(-1)` (the most recent value) or `p.bag(0)` (the
+  first value), in assignments. A branch reads either only when `p`
+  surely holds a value: `p` is the model's only input port, or the
+  branch's condition has `p.bagSize() != 0` as a top-level `&&` term
+  (not negated, not in parentheses, no `||` outside parentheses), e.g.
   `"p.bagSize() != 0 && sigma > 0.0 "`.
 
 A state variable is always followed by a space unless it is the last
 token of an assignment (the generator finds state variables by text
 replacement): write `"( sigma + 0.1 ) / 2.0"` and `"0.1 < sigma "`, not
 `"(sigma+0.1)/2.0"` or `"0.1 < sigma"`.
+
+## Other C++ types
+
+Keep any other C++ type the coupled model uses (a struct like
+`position_t`, `uint8_t`, `float`). Then:
+
+- Write a struct member as `var .field`, with a space before the dot
+  (the generator adds `state.` only to a state variable followed by a
+  space or `;`).
+- Expressions and initial values may use constructors, functions, macros
+  and constants from the model's own C++ headers (e.g.
+  `"position_t()"`). No state variable name may be the
+  ending of these names or of a member name.
+- An expression is a single expression: no statement blocks (no
+  `[&] { ... }()`), no assignments to other variables, no `addMessage`.
+  Computation that needs statements is a named function in the model's
+  headers, called by name.
+- A phase is a `std::string`, never an `enum class`: the generated
+  `operator<<` prints every state variable.
 
 ## Names
 

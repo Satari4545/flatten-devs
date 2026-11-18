@@ -1,12 +1,14 @@
 """Run DEVSMap models in Cadmium v2, via James's DEVSMap generator.
 
     simulate(path, end_time, build_dir) -> list of output events
+    check(path)                         -> path of the generated model header
 
 An event is {"time", "sender", "port", "value"} (sender is the component id).
 
 The model is staged for James's generator (third_party/devsmap_generator),
-whose generated main.cpp is compiled against Cadmium and run. Outputs are kept
-in build/<model name>/ (overwritten per run): cpp/ holds the generated C++,
+whose generated main.cpp is compiled against Cadmium and run (`check` only
+compiles it). Extra compiler flags come from $CXXFLAGS. Outputs are kept in
+build/<model name>/ (overwritten per run): cpp/ holds the generated C++,
 trace.csv the simulation log and stage/ the generator inputs. Models are not
 validated here: when generating, compiling or simulating fails, CadmiumError
 carries that step's output. An unreadable model file raises devsmap's
@@ -14,6 +16,7 @@ ValueError.
 """
 
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -85,6 +88,34 @@ def _run(cmd, what, timeout, cwd):
     return r
 
 
+def _build_dir(model, build_dir=None):
+    return os.path.abspath(
+        build_dir or os.path.join(_REPO, "build", model["name"]))
+
+
+def _generate(model, end_time, build_dir):
+    """Stage the model and generate its C++, replacing build_dir's stage/
+    and cpp/; return (stage, cpp)."""
+    stage = os.path.join(build_dir, "stage")
+    cpp = os.path.join(build_dir, "cpp")
+    for d in (stage, cpp):
+        shutil.rmtree(d, ignore_errors=True)
+    _stage(model, end_time, stage)
+    _run([sys.executable, _GENERATOR], "DEVSMap generator", timeout=120,
+         cwd=stage)
+    shutil.copytree(os.path.join(stage, "output", "main"), cpp)
+    return stage, cpp
+
+
+def _compile(stage, *args):
+    """Compile in stage: built-in flags, then $CXXFLAGS, then args."""
+    cxx = os.environ.get("CXX", "g++")
+    # POSIX quoting: a backslash escapes, so Windows paths are written with /.
+    extra = shlex.split(os.environ.get("CXXFLAGS", ""))
+    _run([cxx, "-std=c++17", "-O1", "-I", _CADMIUM_INCLUDE, *extra, *args],
+         "compile", timeout=300, cwd=stage)
+
+
 def simulate(path, end_time, build_dir=None):
     """Generate, compile and run a DEVSMap model; return its output events.
 
@@ -92,29 +123,17 @@ def simulate(path, end_time, build_dir=None):
     previous run's: cpp/ (generated C++), trace.csv and stage/.
     """
     model = devsmap.load_model(path)
-    build_dir = os.path.abspath(
-        build_dir or os.path.join(_REPO, "build", model["name"]))
-    stage = os.path.join(build_dir, "stage")
-    cpp = os.path.join(build_dir, "cpp")
+    build_dir = _build_dir(model, build_dir)
     trace = os.path.join(build_dir, "trace.csv")
-    for d in (stage, cpp):
-        shutil.rmtree(d, ignore_errors=True)
     if os.path.exists(trace):
         os.remove(trace)
+    stage, cpp = _generate(model, end_time, build_dir)
 
-    _stage(model, end_time, stage)
-    _run([sys.executable, _GENERATOR], "DEVSMap generator", timeout=120,
-         cwd=stage)
-    shutil.copytree(os.path.join(stage, "output", "main"), cpp)
-
-    cxx = os.environ.get("CXX", "g++")
     exe = os.path.join(stage, "simulation" + (".exe" if os.name == "nt"
                                               else ""))
     # -static on Windows: never pick up a different libstdc++ DLL from PATH.
     static = ["-static"] if os.name == "nt" else []
-    _run([cxx, "-std=c++17", "-O1", *static, "-I", _CADMIUM_INCLUDE,
-          os.path.join(cpp, "main.cpp"), "-o", exe],
-         "compile", timeout=300, cwd=stage)
+    _compile(stage, *static, os.path.join(cpp, "main.cpp"), "-o", exe)
 
     _run([exe], "simulation", cwd=stage,
          timeout=int(os.environ.get("DEVS_SIM_TIMEOUT", "60")))
@@ -124,6 +143,17 @@ def simulate(path, end_time, build_dir=None):
         raise CadmiumError("simulation wrote no logfile.csv")
     shutil.copyfile(log, trace)
     return _parse_trace(trace)
+
+
+def check(path):
+    """Generate and compile (not link or run) a DEVSMap model in
+    build/<model name>/; return the path of its generated <name>.hpp."""
+    model = devsmap.load_model(path)
+    stage, cpp = _generate(model, 0.0, _build_dir(model))
+    # -c still instantiates the model's templates, so type errors surface.
+    _compile(stage, "-c", os.path.join(cpp, "main.cpp"),
+             "-o", os.path.join(stage, "main.o"))
+    return os.path.join(cpp, "include", f"{model['name']}.hpp")
 
 
 def _parse_trace(log_path):
