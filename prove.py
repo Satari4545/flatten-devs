@@ -49,10 +49,16 @@ EVENTS = {"int": "internal", "ext": "external", "con": "confluent"}
 WELL_FORMED = "0 <= e <= ta in every component"
 ASSUMPTIONS = (
     "arithmetic is exact: real numbers, not IEEE doubles; signed integers "
-    "without overflow (unsigned ones wrap around as in C++)",
+    "without overflow (unsigned ones wrap around as in C++); this also "
+    "decides which events happen at the same time",
     "functions the models call, and the text of numbers, are uninterpreted "
     "and pure: the same arguments give the same value at every call and in "
     "both models; nothing else is known about them",
+    "what C++ leaves undefined (a bag read out of range, an integer "
+    "division by zero, inf or NaN converted to an integer) gives some "
+    "value, the same for the same operands",
+    "parameters have the values in the coupled model's _param.json (any "
+    "value where it gives none), the constants the C++ is compiled with",
     "the DEVSMap generator and Cadmium run the models as encoded: condition "
     "maps as if/else-if chains, simultaneous assignments, the default "
     "delta_con, Cadmium's bag order",
