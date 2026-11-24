@@ -68,6 +68,7 @@ ASSUMPTIONS = (
 class Report(NamedTuple):
     proven: bool
     failed: list    # names of the obligations not proven
+    vacuous: list   # names of those proven because no state reaches them
     dropped: list   # invariant conditions prune dropped
     seconds: float
 
@@ -304,7 +305,7 @@ class _Proof:
         self.hs = h(self.s)
         self.t = z3.Real("t")
         self.failed, self.dropped = [], []
-        self.checked = self.vacuous = 0
+        self.checked, self.vacuous = 0, []
         inputs = {p: z3.Const(p, z3.SeqSort(sort))
                   for p, sort in resultant.x.items()}
         none = {p: z3.Empty(z3.SeqSort(sort))
@@ -349,7 +350,8 @@ class _Proof:
         self.checked += 1
         if status == "proven":
             vacuous = _query(premise, FALSE)[0] == "proven"
-            self.vacuous += vacuous
+            if vacuous:
+                self.vacuous.append(name)
             print(f"prove: {name}: proven"
                   + (" (vacuously: the invariant rules it out)"
                      if vacuous else ""))
@@ -550,7 +552,7 @@ def prove(coupled_path, fused_path, prune=False):
     proof.check_transitions(conditions)
 
     seconds = time.time() - started
-    counts = (f"{proof.checked} obligations, {proof.vacuous} of them "
+    counts = (f"{proof.checked} obligations, {len(proof.vacuous)} of them "
               f"vacuous; {seconds:.1f} s")
     for name in sorted(enc.constant_calls):
         print(f"prove: warning: {name}() takes no arguments, yet is "
@@ -564,5 +566,5 @@ def prove(coupled_path, fused_path, prune=False):
             f"{name} returns a floating_point (its domain is not under "
             f"\"functions\" in the mapping file)"
             for name in sorted(enc.assumed)]]))
-    return Report(not proof.failed, proof.failed,
+    return Report(not proof.failed, proof.failed, proof.vacuous,
                   [c for c, _ in proof.dropped], seconds)

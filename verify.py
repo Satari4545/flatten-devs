@@ -446,32 +446,52 @@ def fused_counter(first):
 def check_prove_open(folder):
     """An open model whose ports a and b both feed one input port: its bag
     holds a's messages, then b's (eic order), under external and confluent
-    events."""
+    events; a fusion with the default delta_con; the model nested one level
+    down."""
     start = {"count": "0", "sigma": "1.0"}
     write_model(folder, "counter", COUNTER, start)
-    coupled = write_model(folder, "counting", {
-        "x": {"a": "int", "b": "int"}, "y": {"out": "int"},
-        "components": {"counter": "C"},
-        "eic": [{"port_from": p, "component_to": "C", "port_to": "add"}
-                for p in "ab"],
-        "eoc": [{"component_from": "C", "port_from": "out",
-                 "port_to": "out"}], "ic": []}, {"C": start}, kind="coupled")
-    reports = {}
-    for first in "ba":
+
+    def wrapper(name, model, cid, port_to, init):
+        """A coupled model with ports a and b into cid, cid's out out."""
+        return write_model(folder, name, {
+            "x": {"a": "int", "b": "int"}, "y": {"out": "int"},
+            "components": {model: cid}, "ic": [],
+            "eic": [{"port_from": p, "component_to": cid,
+                     "port_to": port_to[p]} for p in "ab"],
+            "eoc": [{"component_from": cid, "port_from": "out",
+                     "port_to": "out"}]}, init, kind="coupled")
+
+    coupled = wrapper("counting", "counter", "C", {"a": "add", "b": "add"},
+                      {"C": start})
+    nested = wrapper("nest", "counting", "W", {"a": "a", "b": "b"},
+                     {"W": {"C": start}})
+
+    def fusion(body, of=coupled, count="C.count"):
         sub = tempfile.mkdtemp(dir=folder)
-        fused = write_model(sub, "fused_counting", fused_counter(first), start)
+        fused = write_model(sub, "fused_counting", body, start)
         devsmap.write_json(os.path.join(sub, "fused_counting_mapping.json"), {
-            "mapping": {"fused_counting": {"count": "C.count",
-                                           "sigma": "ta"}}})
-        reports[first] = proving(coupled, fused)
-    check(reports["b"][0].proven,
-          f"prove: the open counter is not proven:\n{reports['b'][1]}")
-    failed = sorted({name.split(" on ")[0] for name in reports["a"][0].failed})
+            "mapping": {"fused_counting": {"count": count, "sigma": "ta"}}})
+        return proving(of, fused)
+
+    report, text = fusion(fused_counter("b"))
+    check(report.proven and "delta_ext on external events, F branch "
+          "'otherwise'" in report.vacuous,
+          f"prove: the open counter is not proven, or its delta_ext "
+          f"otherwise (no input) is not vacuous:\n{text}")
+    report, text = fusion(fused_counter("a"))
+    failed = sorted({name.split(" on ")[0] for name in report.failed})
     check(failed == ["delta_con", "delta_ext"],
-          f"prove: adding a's message instead of b's fails {failed}:\n"
-          f"{reports['a'][1]}")
+          f"prove: adding a's message instead of b's fails {failed}:\n{text}")
+    report, text = fusion({**fused_counter("b"),
+                           "delta_con": {"otherwise": {}}})
+    check(report.proven and "(delta_int, then delta_ext)" in text,
+          f"prove: the counter with the default delta_con is not "
+          f"proven:\n{text}")
+    report, text = fusion(fused_counter("b"), nested, "W.C.count")
+    check(report.proven, f"prove: the nested counter is not proven:\n{text}")
     print("prove OK: an open model, its two eics into one port in bag "
-          "order, external and confluent events")
+          "order, external and confluent events, a vacuous branch; the "
+          "default delta_con; the model nested one level down")
 
 
 def selftest():
