@@ -58,15 +58,18 @@ def flatten(model):
     def sources(dst, port):
         found = []
         for src, p in feeds.get((dst, port), []):
-            if src in components:
-                found.append((src, p))
-            elif src == root:
+            if src == root:
                 found.append((None, p))
+            elif src in components:
+                found.append((src, p))
             else:
                 found += sources(src, p)
         return found
 
     outs = walk(model, root)
+    if model["kind"] == "atomic":  # its input ports are the model's own
+        x = model["body"].get("x", {})
+        feeds.update({(root, p): [(root, p)] for p in x})
     bags = {(leaf, p): sources(leaf, p)
             for leaf, c in components.items() for p in c["x"]}
     edges = [(s, sp, d, dp) for (d, dp), srcs in bags.items()

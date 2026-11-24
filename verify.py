@@ -144,7 +144,9 @@ def check_bag_order(folder):
     """A nested leaf's input bag: its level's ic sources, then each eic's
     (whose bag holds the outer ic sources, then the model's input)."""
     cell = {"x": {"i": "int"}, "y": {"o": "int"}, "s": {}}
-    write_model(folder, "cell", cell, {})
+    inputs = devsmap_flatten.flatten(devsmap.load_model(
+        write_model(folder, "cell", cell, {})))["inputs"]
+    check(inputs == [("i", "cell", "i")], f"an atomic's inputs: {inputs}")
     write_model(folder, "inner", {
         "x": {"q": "int"}, "y": {}, "components": {"cell": ["L", "M"]},
         "eic": [{"port_from": "q", "component_to": "L", "port_to": "i"}],
