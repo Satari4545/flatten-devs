@@ -166,6 +166,18 @@ def check_message_list(folder):
     print("lambda list OK: [0.5, 0.25] on one port sends both at t = 1.0")
 
 
+def check_simultaneous_assignments(folder):
+    """A branch's assignments happen at once: {"a": "b", "b": "a"} swaps."""
+    swap = write_model(folder, "swap", timer_body(
+        s={"a": "double", "b": "double", "sigma": "double"},
+        delta_int={"otherwise": {"a": "b", "b": "a", "sigma": "1.0"}},
+        **{"lambda": {"otherwise": {"out": "a"}}}),
+        {"a": "1.0", "b": "2.0", "sigma": "1.0"})
+    values = [e["value"] for e in cadmium_api.simulate(swap, 3.5)]
+    check(values == ["1", "2", "1"], f"swap: a was {values}")
+    print("simultaneous assignments OK: {a: b, b: a} swaps a and b")
+
+
 def check_stray_files(folder):
     """Unrelated model files next to the simulated one are ignored."""
     for name in os.listdir(MODELS):
@@ -268,7 +280,8 @@ def selftest():
 def run_checks():
     check_flatten()
     check_coupled_trace()
-    for run in (check_arithmetic, check_message_list, check_stray_files):
+    for run in (check_arithmetic, check_message_list,
+                check_simultaneous_assignments, check_stray_files):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             run(tmp)
     check_fuse_verifier()
