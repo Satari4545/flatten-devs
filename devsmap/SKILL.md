@@ -73,17 +73,27 @@ counter that ticks every 1.0 and adds what arrives on `add`:
 ### Output and time advance
 
 `lambda` keys are conditions on the state only; each value maps output
-ports to one expression each (`{}` sends nothing). `lambda` never changes
-the state: a value that is sent and also needed later is computed and
-stored by a transition, and `lambda` only reads it.
+ports to the message they send, one expression each (`{}` sends nothing).
+Only a port that genuinely sends several messages at the same instant
+takes a JSON list of expressions, one message each, all in the one true
+branch; a single message stays a plain string. Order the list as
+Cadmium orders the coupled model's bag on that port: coupling by
+coupling in the order of its `eoc` list, each adding its source port's
+messages in their own order (a nested coupled source is ordered the
+same way, by its own `eoc`). If `eoc` couples `A.out` to `out` before
+`B.out`: `{"out": ["A_count", "B_count"]}`.
+
+`lambda` never changes the state: a value that is sent and also needed
+later is computed and stored by a transition, and `lambda` only reads it.
 
 `ta` is `{"otherwise": "sigma"}`: one floating-point state variable holds
 the time advance and is `inf` while the model is passive.
 
 ## Expressions
 
-Keys and values are JSON strings, each a single expression on one line: no
-statement blocks, no assignments, no side effects. An expression may use:
+Keys and values are JSON strings (or a list of them for a `lambda` port),
+each a single expression on one line: no statement blocks, no assignments,
+no side effects. An expression may use:
 
 - state variables, parameters, and `var.field` for a field of a struct;
 - `e` (the time since the last transition), only in `delta_ext`;
