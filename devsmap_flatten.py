@@ -17,6 +17,8 @@ def flatten(model):
     "inputs": [(root_in_port, dst, in_port)],
     "outputs": [(src, out_port, root_out_port)]}.
     Duplicate edges are kept: Cadmium delivers once per hierarchical path.
+    Outputs are in the order Cadmium collects a root output port's bag
+    (eoc order, recursively), not sorted.
     """
     components, couplings = {}, []
 
@@ -53,7 +55,7 @@ def flatten(model):
         "components": components,
         "couplings": sorted(couplings),
         "inputs": sorted((p, *d) for p, ds in ins.items() for d in ds),
-        "outputs": sorted((*s, p) for p, ss in outs.items() for s in ss),
+        "outputs": [(*s, p) for p, ss in outs.items() for s in ss],
     }
 
 
