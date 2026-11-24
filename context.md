@@ -91,22 +91,22 @@ system homomorphism (Zeigler, Theory of Modeling and Simulation) in
 `<fused>_mapping.json` next to F, written by hand (or by the LLM):
 
     {"mapping": {"<fused>": {"<F state variable>": <expression, or
-                             {"<condition>": <expression>, ...,
-                              "otherwise": <expression>}>}},
+                             {"<condition>": <expression or map>, ...,
+                              "otherwise": <expression or map>}>}},
      "invariant": ["<condition>", ...],
      "functions": {"<function>": "<result domain>", ...}}
 
+Mapping expressions and invariant conditions are DEVSMap over R's state:
+`<component id>.<variable>` (and `.field`; nested ids are paths,
+`P.L.phase`), `<component id>.e` (time since its last transition),
+parameters, and `ta` (R's time advance). A condition map of values may
+nest; each level ends with `"otherwise"`. The invariant describes R's
+reachable states; `0 <= e <= ta` in every component is added to it.
 `functions` (optional) gives the result domains of the functions the
-models call; an undeclared one is assumed to return a floating_point, and
-a `/` or `%` whose meaning would depend on that (C++ divides integers
-differently) is refused.
+models call.
 
-Expressions are DEVSMap over R's state: `<component id>.<variable>` (and
-`.field`; nested ids are paths, `P.L.phase`), `<component id>.e` (time
-since its last transition), parameters, and `ta` (R's time advance). The
-invariant describes R's reachable states; `0 <= e <= ta` per component
-is added to it. One Z3 query per
-obligation (UNSAT is proven), split per F branch:
+One Z3 query per obligation (unsat is proven; sat or unknown is not),
+split per kind of event and per F branch:
 
 - init: the invariant holds in R's initial state; h maps it to F's.
 - the invariant is kept by internal, external and confluent events.
@@ -125,29 +125,52 @@ multiset, as fuse does.
 
 A failed obligation prints a counterexample: each component's state, h
 of it, the event (time, inputs, imminent components) and what differs.
-`--prune` first drops invariant conditions that are false initially or
-not kept relative to the others (Houdini) and lists them. Exit 0 means
-PROVEN. A proven obligation whose premise the invariant rules out is
-marked vacuous (e.g. an F branch no reachable state takes).
+A proven obligation whose premise the invariant rules out is marked
+vacuous (e.g. an F branch no reachable state takes). `--prune` first
+drops invariant conditions not proven initially or not kept relative to
+the others (Houdini) and lists them. Exit 0 means PROVEN.
 
 The encoding (`devsmap_z3`) follows the generator: if/else-if condition
-maps, simultaneous assignments, default delta_con (delta_int, then
-delta_ext with e = 0), C++ integer `/` and `%`. floating_point is the
-reals plus -0.0, inf, -inf and NaN. Zeros keep IEEE's signs (`1.0 /
--0.0` is -inf, `-0.0 == 0.0`); NaN keeps its sign (`nan`, `-nan`), every
-comparison with it is false except `!=`, arithmetic passes a NaN operand
-on, and an invalid operation (inf - inf, 0 * inf) gives -nan, as on x86.
-Unsigned integers are 32-bit words (`size_t` 64) that wrap around as in
-C++, so `u - 1` at 0 is 4294967295 and `u < 0` never holds. Structs are
-datatypes, arrays and bags sequences. Parameter values come
-from `<coupled>_param.json` (one value per name), else any value.
+maps (no true key: nothing happens), simultaneous assignments, the
+default delta_con (delta_int, then delta_ext with e = 0), `ta` only as
+`{"otherwise": "<state variable>"}`, C++ integer `/` and `%`, `"text" +
+x` as the text of each operand. Domains:
 
-PROVEN assumes: exact arithmetic (real numbers, not IEEE doubles;
-signed integers without overflow); functions the models call and
-the text of numbers (`"text" + x`) are uninterpreted and pure, so the
-same arguments give the same value at every call and in both models and
-nothing else is known about them (a call without arguments is warned
-about); and the generator and Cadmium run the models as encoded.
+- integer: unbounded integers. unsigned_integer: 32-bit words (`size_t`
+  64) that wrap around as in C++ (`u - 1` at 0 is 4294967295, `u < 0`
+  never holds; an int operand converts to unsigned).
+- floating_point: the reals plus -0.0, inf, -inf and NaN. Zeros keep
+  IEEE's signs (`1.0 / -0.0` is -inf, `-0.0 == 0.0`). NaN keeps its sign
+  (`nan`, `-nan`); every comparison with it is false except `!=`,
+  arithmetic passes a NaN operand on, and an invalid operation (inf - inf,
+  0 * inf, 0 / 0) gives -nan, as on x86.
+- string, boolean; a struct set of the definitions files is a datatype
+  (`set(...)`, `.field`); arrays and input bags are sequences
+  (`bagSize()`, `bag(i)` with a Python-style index).
+- A function the models call is uninterpreted; it returns its domain
+  under `functions`, else a floating_point, and then a `/` or `%` that C++
+  might do on integers through it is refused. The text of a number is
+  uninterpreted too.
+
+Refused outright: an integer literal with a leading zero (octal in C++),
+and a state variable or port named `e`, `inf`, `nan`, `true` or `false`.
+Parameter values come from `<coupled>_param.json` (one value per name),
+else any value.
+
+PROVEN assumes:
+
+- exact arithmetic: real numbers, not IEEE doubles; signed integers
+  without overflow. This also decides which events happen at the same
+  time.
+- functions and the text of numbers are pure: the same arguments give
+  the same value at every call and in both models, and nothing else is
+  known about them; an undeclared function returns a floating_point. A
+  call without arguments is warned about.
+- what C++ leaves undefined (a bag read out of range, an integer
+  division by zero, inf or NaN converted to an integer) gives some value,
+  the same for the same operands.
+- the parameter values are the constants the C++ is compiled with.
+- the generator and Cadmium run the models as encoded.
 
 ## Cadmium backend
 

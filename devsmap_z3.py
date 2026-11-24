@@ -9,22 +9,8 @@
     all_of, any_of, not_, ite      Boolean and if-then-else builders
     within(where, run, *args)      run, naming `where` in its ValueError
 
-Domains: integer -> Int, unsigned_integer -> 32-bit vector, boolean -> Bool,
-floating_point -> FLOAT (the reals plus inf, -inf and NaN), string ->
-String, a struct set of the definitions files -> a datatype (constructor
-`set(...)`, accessor `.field`), an array field -> a sequence. An input bag
-is a sequence: bagSize() is its length, bag(i) a Python-style index.
-
-Meaning follows the generator and Cadmium: a condition map is an if/else-if
-chain in key order (no true key: nothing happens), a branch's assignments
-all read the state before the transition, a default delta_con is delta_int
-then delta_ext with e = 0, integer / and % truncate toward zero, and
-"text" + x joins each operand's text. Unlike C++, arithmetic is exact (real
-and signed integer: no rounding or overflow). NaN keeps its sign (nan,
--nan): every comparison with it is false except !=, arithmetic passes a NaN
-operand on, and an invalid operation (inf - inf, 0 * inf, 0 / 0) gives
--nan, as on x86. A function the models call is uninterpreted and returns a
-floating_point; so is the text of a number.
+context.md, "Proving a fusion", describes how each domain and operator is
+encoded and what that assumes.
 """
 
 import fractions
@@ -494,7 +480,8 @@ class Encoding:
 
     def _assumes(self, node):
         """Whether a syntax tree calls a function of assumed domain."""
-        if node[0] == "call" and node[1] not in self._sets                 and node[1] not in self._results:
+        if node[0] == "call" and node[1] not in {*self._sets,
+                                                 *self._results}:
             return True
         return any(self._assumes(part)
                    for child in node[1:] if isinstance(child, (tuple, list))
@@ -628,7 +615,8 @@ class Encoding:
         def walk(m, guard, labels):
             rest = guard
             for key, body in m.items():
-                cond = TRUE if key == "otherwise" else                     self.condition(key, scope)
+                cond = (TRUE if key == "otherwise"
+                        else self.condition(key, scope))
                 taken, rest = all_of(rest, cond), all_of(rest, not_(cond))
                 if nested(body):
                     walk(body, taken, labels + [key])
@@ -726,7 +714,8 @@ class Atomic:
                 if port not in self.y:
                     raise ValueError(f"{label!r}: {port} is not an output "
                                      f"port")
-                for m in messages if isinstance(messages, list) else [messages]:
+                for m in (messages if isinstance(messages, list)
+                          else [messages]):
                     sent[port].append((guard, within(
                         f"{label!r} {port}", self.enc.value, m, self.y[port],
                         scope)))

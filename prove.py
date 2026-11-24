@@ -2,34 +2,10 @@
 
     prove(coupled_path, fused_path, prune=False) -> Report
 
-The proof is a system homomorphism (Zeigler, Theory of Modeling and
-Simulation) from the coupled model's resultant R (its closure under
-coupling, as Cadmium runs it) to the fused atomic F. The map h from R's
-states to F's and an invariant on R's reachable states are given in
-<fused name>_mapping.json next to the fused model:
-
-    {"mapping": {"<fused name>": {"<fused state variable>": <expression or
-                                  condition map of expressions>}},
-     "invariant": ["<condition>", ...]}
-
-Both are DEVSMap expressions over R's state: <component id>.<variable>
-(and .field), <component id>.e (the time since that component's last
-transition), parameters, and ta (R's time advance). Z3 checks each
-obligation for all values at once:
-
-- init: the invariant holds in R's initial state, and h maps it to F's
-- the invariant is inductive under internal, external and confluent events
-- ta_F(h(s)) = ta_R(s), and lambda_F(h(s)) is R's output
-- delta_F(h(s)) = h(delta_R(s)) for every kind of event
-
-R's state is each component's variables and elapsed time e. Besides the
-given invariant, every reachable state has 0 <= e <= ta (ta not NaN) per
-component; this is proven too. R's output is
-what its eoc sends, in Cadmium's order; a model without ports outputs every
-component's messages, as "<id>:<value>" and as a multiset, as fuse
-compares. With prune, invariant conditions that are false initially or not
-inductive relative to the others are dropped (Houdini) before the rest is
-checked. The encoding is devsmap_z3's.
+Z3 checks that the map in <fused name>_mapping.json, with its invariant,
+is a homomorphism from the coupled model's resultant (as Cadmium runs it)
+to the fused atomic. context.md, "Proving a fusion", describes the mapping
+file, the obligations and what a proof assumes.
 """
 
 import os
@@ -383,16 +359,20 @@ class _Proof:
 
     @staticmethod
     def state_lines(m, s):
-        return [f"    {cid}: " + ", ".join(
-                    f"{v} = {show(m.eval(x, True))}" for v, x in values.items())
-                + f", e = {show(m.eval(duration(s.e[cid]), True))}"
+        def value(x):
+            return show(m.eval(x, True))
+
+        return [f"    {cid}: "
+                + ", ".join(f"{v} = {value(x)}" for v, x in values.items())
+                + f", e = {value(duration(s.e[cid]))}"
                 for cid, values in s.vars.items()]
 
     @staticmethod
     def differences(m, want, got, what):
         return [f"  {what} {k}: expected {show(m.eval(want[k], True))}, "
                 f"got {show(m.eval(got[k], True))}"
-                for k in want if not z3.is_true(m.eval(want[k] == got[k], True))]
+                for k in want
+                if not z3.is_true(m.eval(want[k] == got[k], True))]
 
     def prune(self, conditions):
         """The conditions left after dropping, until none changes, those
