@@ -127,7 +127,8 @@ marked vacuous (e.g. an F branch no reachable state takes).
 The encoding (`devsmap_z3`) follows the generator: if/else-if condition
 maps, simultaneous assignments, default delta_con (delta_int, then
 delta_ext with e = 0), C++ integer `/` and `%`. floating_point is the
-reals plus inf, -inf and NaN; NaN keeps its sign (`nan`, `-nan`), every
+reals plus -0.0, inf, -inf and NaN. Zeros keep IEEE's signs (`1.0 /
+-0.0` is -inf, `-0.0 == 0.0`); NaN keeps its sign (`nan`, `-nan`), every
 comparison with it is false except `!=`, arithmetic passes a NaN operand
 on, and an invalid operation (inf - inf, 0 * inf) gives -nan, as on x86.
 Structs are datatypes, arrays and bags sequences. Parameter values come

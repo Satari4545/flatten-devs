@@ -37,18 +37,20 @@ import devsmap
 from devsmap_expr import parse
 
 _float = z3.Datatype("floating_point")
-_float.declare("fin", ("val", z3.RealSort()))
+_float.declare("fin", ("val", z3.RealSort()))  # fin(0) is +0.0
+_float.declare("nzero")                         # -0.0
 _float.declare("pinf")
 _float.declare("ninf")
 _float.declare("nan", ("negative", z3.BoolSort()))
 FLOAT = _float.create()
-INF, NINF = FLOAT.pinf, FLOAT.ninf
+INF, NINF, NZERO = FLOAT.pinf, FLOAT.ninf, FLOAT.nzero
 INVALID = FLOAT.nan(z3.BoolVal(True))  # x86 gives -nan for inf - inf
-_KINDS = {"fin": FLOAT.constructor(0), "pinf": FLOAT.constructor(1),
-          "ninf": FLOAT.constructor(2), "nan": FLOAT.constructor(3)}
+_KINDS = {kind: FLOAT.constructor(i)
+          for i, kind in enumerate(("fin", "nzero", "pinf", "ninf", "nan"))}
 
 INT, BOOL, STRING = z3.IntSort(), z3.BoolSort(), z3.StringSort()
 TRUE, FALSE = z3.BoolVal(True), z3.BoolVal(False)
+_ZERO = z3.RealVal(0)
 _BASIC = {
     "integer": INT, "int": INT, "long": INT, "char": INT,
     "unsigned_integer": INT, "unsigned int": INT, "unsigned": INT,
@@ -63,7 +65,7 @@ _CONSTANTS = {"true": TRUE, "false": FALSE, "inf": INF,
 
 
 def fin(x):
-    """A finite floating_point holding the Real (or number) x."""
+    """A finite floating_point holding the Real (or number) x; 0 is +0.0."""
     return FLOAT.fin(x)
 
 
@@ -85,6 +87,14 @@ def any_of(*cs):
 
 def not_(c):
     return FALSE if z3.is_true(c) else TRUE if z3.is_false(c) else z3.Not(c)
+
+
+def _xor(p, q):
+    if z3.is_true(p) or z3.is_false(p):
+        return not_(q) if z3.is_true(p) else q
+    if z3.is_true(q) or z3.is_false(q):
+        return not_(p) if z3.is_true(q) else p
+    return z3.Xor(p, q)
 
 
 def ite(c, a, b):
@@ -109,98 +119,119 @@ def _is(kind, a):
     return getattr(FLOAT, f"is_{kind}")(a)
 
 
-def _val(a):
-    return a.arg(0) if _kind(a) == "fin" else FLOAT.val(a)
+def _finite(a):
+    return any_of(_is("fin", a), _is("nzero", a))
+
+
+def _real(a):
+    """The Real value of a finite a."""
+    kind = _kind(a)
+    if kind == "fin":
+        return a.arg(0)
+    return _ZERO if kind == "nzero" else ite(_is("nzero", a), _ZERO,
+                                             FLOAT.val(a))
 
 
 def _rational(x):
     return x.as_fraction() if z3.is_rational_value(x) else None
 
 
-def _real_cmp(op, x, y):
+_REAL_OPS = {"+": operator.add, "-": operator.sub, "*": operator.mul,
+             "/": operator.truediv, "<": operator.lt, "==": operator.eq,
+             ">": operator.gt}
+
+
+def _real_op(op, x, y):
     """x op y on Reals, folded when both are numerals."""
     px, py = _rational(x), _rational(y)
-    if px is not None and py is not None:
-        return z3.BoolVal({"<": px < py, "==": px == py, ">": px > py}[op])
-    return {"<": x < y, "==": x == y, ">": x > y}[op]
+    if px is None or py is None or (op == "/" and py == 0):
+        return _REAL_OPS[op](x, y)
+    value = _REAL_OPS[op](px, py)
+    return z3.BoolVal(value) if isinstance(value, bool) else \
+        z3.RealVal(str(value))
+
+
+def _signbit(a):
+    """For a non-NaN a: whether it is negative (-0.0 and -inf too)."""
+    return any_of(_is("nzero", a), _is("ninf", a),
+                  all_of(_is("fin", a), _real_op("<", _real(a), _ZERO)))
+
+
+def _zero(a):
+    return any_of(_is("nzero", a),
+                  all_of(_is("fin", a), _real_op("==", _real(a), _ZERO)))
+
+
+def _make(x, negative):
+    """The finite floating_point x; when x is 0, -0.0 if `negative`."""
+    return ite(all_of(_real_op("==", x, _ZERO), negative), NZERO, fin(x))
 
 
 def f_neg(a):
-    if _kind(a) == "fin":
-        return fin(-a.arg(0))
-    return ite(_is("fin", a), fin(-_val(a)),
+    return ite(_finite(a), _make(_real_op("-", _ZERO, _real(a)),
+                                 not_(_signbit(a))),
                ite(_is("pinf", a), NINF,
                    ite(_is("ninf", a), INF,
                        FLOAT.nan(z3.Not(FLOAT.negative(a))))))
 
 
-def _positive(a):
-    """For a non-NaN a: a > 0 (or +inf)."""
-    return any_of(_is("pinf", a),
-                  all_of(_is("fin", a),
-                         _real_cmp(">", _val(a), z3.RealVal(0))))
-
-
-def _zero(a):
-    return all_of(_is("fin", a), _real_cmp("==", _val(a), z3.RealVal(0)))
-
-
-def _exact(op, x, y):
+def _exact(op, a, b):
+    """a op b for finite a and b, with IEEE's signed zeros."""
+    x, y = _real(a), _real(b)
+    sign = _xor(_signbit(a), _signbit(b))
     if op == "/":
-        zero = z3.RealVal(0)
-        return ite(_real_cmp("==", y, zero),
-                   ite(_real_cmp(">", x, zero), INF,
-                       ite(_real_cmp("<", x, zero), NINF, INVALID)),
-                   fin(x / y))
-    return fin({"+": x + y, "-": x - y, "*": x * y}[op])
+        return ite(_real_op("==", y, _ZERO),
+                   ite(_real_op("==", x, _ZERO), INVALID,
+                       ite(sign, NINF, INF)),
+                   _make(_real_op("/", x, y), sign))
+    negative = {"*": sign, "+": all_of(_signbit(a), _signbit(b)),
+                "-": all_of(_signbit(a), not_(_signbit(b)))}[op]
+    return _make(_real_op(op, x, y), negative)
 
 
 def _infinite(op, a, b):
     """a op b when neither is NaN and one is infinite."""
     if op == "+":
-        return ite(_is("fin", a), b,
-                   ite(_is("fin", b), a, ite(a == b, a, INVALID)))
+        return ite(_finite(a), b,
+                   ite(_finite(b), a, ite(a == b, a, INVALID)))
     if op == "-":
-        return ite(_is("fin", a), f_neg(b),
-                   ite(_is("fin", b), a, ite(a == b, INVALID, a)))
+        return ite(_finite(a), f_neg(b),
+                   ite(_finite(b), a, ite(a == b, INVALID, a)))
+    sign = _xor(_signbit(a), _signbit(b))
     if op == "*":
         return ite(any_of(_zero(a), _zero(b)), INVALID,
-                   ite(_positive(a) == _positive(b), INF, NINF))
-    return ite(_is("fin", a), fin(0),
-               ite(_is("fin", b),
-                   ite(_positive(a) == not_(_real_cmp("<", _val(b),
-                                                       z3.RealVal(0))),
-                       INF, NINF),
-                   INVALID))
+                   ite(sign, NINF, INF))
+    return ite(_finite(a), ite(sign, NZERO, fin(0)),
+               ite(_finite(b), ite(sign, NINF, INF), INVALID))
 
 
 def f_arith(op, a, b):
     """a op b for op in + - * / on FLOAT values."""
-    both = all_of(_is("fin", a), _is("fin", b))
+    both = all_of(_finite(a), _finite(b))
     if z3.is_true(both):
-        return _exact(op, _val(a), _val(b))
+        return _exact(op, a, b)
     special = ite(_is("nan", a), a,
                   ite(_is("nan", b), b, _infinite(op, a, b)))
-    return ite(both, _exact(op, _val(a), _val(b)), special)
+    return ite(both, _exact(op, a, b), special)
 
 
 def f_lt(a, b):
-    both = all_of(_is("fin", a), _is("fin", b))
+    both = all_of(_finite(a), _finite(b))
     if z3.is_true(both):
-        return _real_cmp("<", _val(a), _val(b))
+        return _real_op("<", _real(a), _real(b))
     return all_of(not_(_is("nan", a)), not_(_is("nan", b)),
-                  ite(both, _real_cmp("<", _val(a), _val(b)),
+                  ite(both, _real_op("<", _real(a), _real(b)),
                       any_of(all_of(_is("ninf", a), not_(_is("ninf", b))),
                              all_of(not_(_is("pinf", a)), _is("pinf", b)))))
 
 
 def f_eq(a, b):
-    """IEEE a == b: false if either is NaN."""
-    both = all_of(_is("fin", a), _is("fin", b))
+    """IEEE a == b: false if either is NaN, -0.0 == 0.0."""
+    both = all_of(_finite(a), _finite(b))
     if z3.is_true(both):
-        return _real_cmp("==", _val(a), _val(b))
+        return _real_op("==", _real(a), _real(b))
     return all_of(not_(_is("nan", a)), not_(_is("nan", b)),
-                  ite(both, _real_cmp("==", _val(a), _val(b)), a == b))
+                  ite(both, _real_op("==", _real(a), _real(b)), a == b))
 
 
 def f_le(a, b):
@@ -341,10 +372,10 @@ class Encoding:
         if have == FLOAT and sort == BOOL:
             return not_(f_eq(v, fin(0)))
         if have == FLOAT and sort == INT:
-            x = _val(v)
+            x = _real(v)
             truncated = z3.If(x >= 0, z3.ToInt(x), -z3.ToInt(-x))
             undefined = self.function("float_to_int", [FLOAT], INT)(v)
-            return ite(_is("fin", v), truncated, undefined)
+            return ite(_finite(v), truncated, undefined)
         raise ValueError(f"a {sort_name(have)} where a {sort_name(sort)} is "
                          f"expected")
 
@@ -620,7 +651,8 @@ def show(v):
             return _show_real(v.arg(0))
         if kind == "nan":
             return "-nan" if z3.is_true(v.arg(0)) else "nan"
-        return {"pinf": "inf", "ninf": "-inf"}.get(kind, str(v))
+        return {"nzero": "-0.0", "pinf": "inf", "ninf": "-inf"}.get(
+            kind, str(v))
     if sort == STRING and z3.is_string_value(v):
         return json.dumps(v.as_string())
     if z3.is_int_value(v) or z3.is_true(v) or z3.is_false(v):
