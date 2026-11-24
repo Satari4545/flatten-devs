@@ -1,6 +1,7 @@
 """Flatten a loaded DEVSMap model and summarize it for the LLM.
 
     flatten(model)           -> leaf atomics + leaf-to-leaf couplings
+    atomic_models(model)     -> {model name: body} of its atomic models
     flattened_summary(model) -> compact text for the LLM
 
 `model` is a devsmap.load_model result. Stdlib only.
@@ -84,12 +85,13 @@ def _compact(obj):
     return json.dumps(obj, separators=(",", ":"))
 
 
-def _atomic_models(model, out=None):
+def atomic_models(model, out=None):
+    """{model name: body} of every atomic model in the tree."""
     out = {} if out is None else out
     if model["kind"] == "atomic":
         out[model["name"]] = model["body"]
     for sub in model.get("models", {}).values():
-        _atomic_models(sub, out)
+        atomic_models(sub, out)
     return out
 
 
@@ -114,7 +116,7 @@ def flattened_summary(model):
     lines += [f"- {s}.{sp} -> y.{p}" for s, sp, p in flat["outputs"]]
 
     lines += ["", "Atomic models (DEVSMap):"]
-    for name, body in sorted(_atomic_models(model).items()):
+    for name, body in sorted(atomic_models(model).items()):
         lines.append(f"- {name}: {_compact(body)}")
 
     lines += [
