@@ -1,8 +1,9 @@
 """Load DEVSMap model trees and provide JSON helpers.
 
 `load_model` includes referenced component models and initial states;
-`model_name` extracts the model key; `read_json` and `write_json` read and
-write a document.
+`model_files`, `definition_files` and `param_path` locate the files a model
+uses and `read_params` reads its parameter values; `model_name` extracts the
+model key; `read_json` and `write_json` read and write a document.
 """
 
 import contextlib
@@ -75,7 +76,7 @@ def _load(path):
             raise ValueError(f"{filename}: model '{name}' must be in "
                              f"{name}_atomic.json or {name}_coupled.json")
         model = {"name": name, "kind": kind, "path": os.path.abspath(path),
-                 "body": data[name]}
+                 "body": data[name], "parameters": data.get("parameters", {})}
         if kind == "atomic":
             return model
         # The paper's form maps a model to one id; a list allows several.
@@ -97,18 +98,65 @@ def _load(path):
     return model
 
 
+def model_files(model):
+    """Paths of the model's file and every component model file below it."""
+    paths = [model["path"]]
+    for sub in model.get("models", {}).values():
+        paths += model_files(sub)
+    return list(dict.fromkeys(paths))
+
+
+def definition_files(model):
+    """Paths of the files in the include_sets of the model and every
+    component model, each relative to the model file listing it."""
+    paths = []
+    for model_path in model_files(model):
+        folder = os.path.dirname(model_path)
+        for name in read_json(model_path).get("include_sets", []):
+            path = os.path.abspath(os.path.join(folder, name))
+            if not os.path.exists(path):
+                raise ValueError(f"{os.path.basename(model_path)}: "
+                                 f"include_sets file {name} does not exist")
+            paths.append(path)
+    return list(dict.fromkeys(paths))
+
+
+def param_path(model):
+    """Where the model's parameter values are, if it has any."""
+    return os.path.join(os.path.dirname(model["path"]),
+                        f"{model['name']}_param.json")
+
+
+def read_params(model):
+    """{leaf path: {parameter: value}} from the model's parameter file ({}
+    without one); a component the file leaves out gets {}."""
+    path = param_path(model)
+    if not os.path.exists(path):
+        return {}
+    with _reading(os.path.basename(path)):
+        return _per_leaf(model, read_json(path)["parameters"], default={})
+
+
 def _read_init(model):
-    doc = read_json(model["init_path"])
-    init = {}
+    return _per_leaf(model, read_json(model["init_path"])["init_states"])
+
+
+def _per_leaf(model, doc, default=None):
+    """{leaf path: node} of a document in the paper's hierarchical form
+    ({"<top>": {"<id>": {"<sub id>": ...}}}); a component missing from it is
+    an error, or gets `default` if one is given."""
+    leaves = {}
 
     def walk(m, node, path):
         if m["kind"] == "atomic":
-            init[path] = node
+            leaves[path] = node
             return
         for c in m["components"]:
-            walk(m["models"][c["model"]], node[c["id"]],
+            child = (node[c["id"]] if default is None
+                     else node.get(c["id"], default))
+            walk(m["models"][c["model"]], child,
                  f"{path}.{c['id']}" if path else c["id"])
 
-    walk(model, doc["init_states"][model["name"]],
+    walk(model, doc[model["name"]],
          model["name"] if model["kind"] == "atomic" else "")
-    return init
+    return leaves

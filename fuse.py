@@ -364,29 +364,6 @@ def model_size(model):
     return sum(s for s, _ in sizes), sum(b for _, b in sizes)
 
 
-def model_files(model):
-    """Paths of the model's file and every component model file below it."""
-    paths = [model["path"]]
-    for sub in model.get("models", {}).values():
-        paths += model_files(sub)
-    return list(dict.fromkeys(paths))
-
-
-def definition_files(model):
-    """Paths of the files in the include_sets of the model and every
-    component model, each relative to the model file listing it."""
-    paths = []
-    for model_path in model_files(model):
-        folder = os.path.dirname(model_path)
-        for name in devsmap.read_json(model_path).get("include_sets", []):
-            path = os.path.abspath(os.path.join(folder, name))
-            if not os.path.exists(path):
-                raise ValueError(f"{os.path.basename(model_path)}: "
-                                 f"include_sets file {name} does not exist")
-            paths.append(path)
-    return list(dict.fromkeys(paths))
-
-
 def raw_file(path):
     """A file's contents as a ```json block headed by its filename."""
     with open(path, encoding="utf-8") as f:
@@ -397,11 +374,10 @@ def build_prompt(model, reference):
     """The first prompt; `reference` is None for an open model."""
     with open(DEVSMAP_SPEC, encoding="utf-8") as f:
         spec = f.read()
-    paths = model_files(model) + definition_files(model) + [model["init_path"]]
-    param_path = os.path.join(os.path.dirname(model["path"]),
-                              f"{model['name']}_param.json")
-    if os.path.exists(param_path):
-        paths.append(param_path)
+    paths = (devsmap.model_files(model) + devsmap.definition_files(model)
+             + [model["init_path"]])
+    if os.path.exists(devsmap.param_path(model)):
+        paths.append(devsmap.param_path(model))
     if reference is None:
         rules = NO_TRACE_RULES
     else:
@@ -710,7 +686,7 @@ def fuse(coupled_path, out_dir=OUT_DIR):
     the LLM is asked anything.
     """
     model = devsmap.load_model(coupled_path)
-    definitions = definition_files(model)
+    definitions = devsmap.definition_files(model)
     load_env_file()
     max_iters = env_int("FUSE_MAX_ITERS", 3)
     settings = llm_settings()
