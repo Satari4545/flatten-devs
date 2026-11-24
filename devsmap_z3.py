@@ -61,6 +61,7 @@ _BASIC = {
 }
 _CONSTANTS = {"true": TRUE, "false": FALSE, "inf": INF,
               "nan": FLOAT.nan(FALSE)}
+RESERVED = {*_CONSTANTS, "e"}  # names no variable, port or parameter takes
 
 
 def fin(x):
@@ -589,6 +590,17 @@ class Atomic:
         self.s, self.x, self.y = (
             {k: within(f"{name}.{key}.{k}", encoding.sort, d)
              for k, d in body.get(key, {}).items()} for key in ("s", "x", "y"))
+        reserved = sorted(RESERVED & {*self.s, *self.x, *self.y})
+        if reserved:
+            raise ValueError(f"{name}: {', '.join(reserved)} is a reserved "
+                             f"name, not a state variable or port")
+        ta = body.get("ta")
+        if not (isinstance(ta, dict) and list(ta) == ["otherwise"]
+                and ta["otherwise"] in self.s):
+            raise ValueError(f"{name}.ta: must be {{\"otherwise\": "
+                             f"\"<state variable>\"}}, the only form the "
+                             f"generator translates")
+        self.sigma = ta["otherwise"]
         con = body.get("delta_con")
         self.own_confluent = bool(con) and con != {"otherwise": {}}
 
@@ -608,12 +620,11 @@ class Atomic:
                              f"{sorted(values)}, the state variables are "
                              f"{sorted(self.s)}")
         return {v: within(f"{self.name} initial {v}", self.enc.value,
-                           values[v], sort, self.enc.params)
+                          values[v], sort, self.enc.params)
                 for v, sort in self.s.items()}
 
     def ta(self, state):
-        return within(f"{self.name}.ta", self.enc.choose, self.body["ta"],
-                       FLOAT, self.scope(state))
+        return self.enc.convert(state[self.sigma], FLOAT)
 
     def output(self, state):
         """{output port: [(guard, message)]}: the messages lambda sends, in
@@ -646,7 +657,7 @@ class Atomic:
         scope = self.scope(state, *((e, bags) if kind != "int" else ()))
         found = []
         for label, guard, body in within(where, self.enc.branches,
-                                          self.body[f"delta_{kind}"], scope):
+                                         self.body[f"delta_{kind}"], scope):
             unknown = set(body) - set(self.s)
             if unknown:
                 raise ValueError(f"{where} {label!r}: assigns "
@@ -654,7 +665,7 @@ class Atomic:
                                  f"variables")
             found.append((label, guard, {**state, **{
                 v: within(f"{where} {label!r} {v}", self.enc.value, x,
-                           self.s[v], scope) for v, x in body.items()}}))
+                          self.s[v], scope) for v, x in body.items()}}))
         return found
 
     def delta(self, kind, state, e=None, bags=None):

@@ -316,7 +316,14 @@ def check_encoding():
         check(solver.check() == z3.unsat, f"encoding: {text} not always true")
     expect_error(ValueError, "leading zero", "encoding 010",
                  enc.condition, "010 == 8", {})
-    print("encoding OK: unsigned wraparound, signed zeros, no octal literal")
+    expect_error(ValueError, "e is a reserved name", "a state variable e",
+                 devsmap_z3.Atomic, enc, "m",
+                 timer_body(s={"e": "double", "sigma": "double"}))
+    expect_error(ValueError, "the only form", "a ta expression",
+                 devsmap_z3.Atomic, enc, "m",
+                 timer_body(ta={"otherwise": "sigma * 2.0"}))
+    print("encoding OK: unsigned wraparound, signed zeros; no octal "
+          "literal, reserved name or ta other than a state variable")
 
 
 def proving(coupled, fused, prune=False):
