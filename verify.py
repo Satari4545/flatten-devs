@@ -316,6 +316,12 @@ def check_encoding():
         check(solver.check() == z3.unsat, f"encoding: {text} not always true")
     expect_error(ValueError, "leading zero", "encoding 010",
                  enc.condition, "010 == 8", {})
+    halve = ("abs(i) / 2", {"i": z3.Int("i")})
+    expect_error(ValueError, "only assumed floating_point",
+                 "dividing by 2 an undeclared function's result", enc.value,
+                 halve[0], devsmap_z3.FLOAT, halve[1])
+    enc.declare_functions({"abs": "integer"})
+    enc.value(halve[0], devsmap_z3.FLOAT, halve[1])  # now an int division
     expect_error(ValueError, "e is a reserved name", "a state variable e",
                  devsmap_z3.Atomic, enc, "m",
                  timer_body(s={"e": "double", "sigma": "double"}))

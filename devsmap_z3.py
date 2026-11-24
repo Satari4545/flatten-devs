@@ -332,6 +332,18 @@ class Encoding:
                 self._sets[name] = fields
         self._structs = {}
         self._functions = {}
+        self._results = {}  # declared result sorts of the models' functions
+        self.assumed = set()  # functions called whose result is assumed
+        self.constant_calls = set()  # functions called with no arguments
+
+    def declare_functions(self, domains):
+        """Give the functions the models call result domains {name:
+        domain}; an undeclared one returns a floating_point."""
+        for name, domain in domains.items():
+            if name in self._sets:
+                raise ValueError(f"{name} is a set, not a function")
+            self._results[name] = within(f"function {name}", self.sort,
+                                         domain)
 
     def sort(self, domain):
         """The Z3 sort of a domain (a set name)."""
@@ -431,8 +443,31 @@ class Encoding:
             return self._negate(self.eval(node[1], scope))
         if kind == "concat":
             return z3.Concat([self._text(part, scope) for part in node[1]])
-        return self._binary(node[1], self.eval(node[2], scope),
-                            self.eval(node[3], scope))
+        a, b = self.eval(node[2], scope), self.eval(node[3], scope)
+        if node[1] in ("/", "%"):
+            self._check_division(node, a, b)
+        return self._binary(node[1], a, b)
+
+    def _assumes(self, node):
+        """Whether a syntax tree calls a function of assumed domain."""
+        if node[0] == "call" and node[1] not in self._sets                 and node[1] not in self._results:
+            return True
+        return any(self._assumes(part)
+                   for child in node[1:] if isinstance(child, (tuple, list))
+                   for part in (child if isinstance(child, list) else [child]))
+
+    def _check_division(self, node, a, b):
+        """Refuse a / or % that C++ might do on integers, through a function
+        whose result is only assumed floating_point."""
+        op, left, right = node[1:]
+        for side, other, value in ((left, right, b), (right, left, a)):
+            if self._assumes(side) and (op == "%" or self._assumes(other)
+                                        or _plain(value).sort() != FLOAT):
+                raise ValueError(
+                    f"{op} on a function's result whose domain is only "
+                    f"assumed floating_point; C++ may divide integers here: "
+                    f"declare the function under \"functions\" in the "
+                    f"mapping file")
 
     def _name(self, name, scope):
         if name in scope:
@@ -475,8 +510,12 @@ class Encoding:
             return make(*[self.value(a, make.domain(i), scope)
                           for i, a in enumerate(args)])
         values = [_plain(self.eval(a, scope)) for a in args]
+        if name not in self._results:
+            self.assumed.add(name)
+        if not args:
+            self.constant_calls.add(name)
         return self.function(name, [v.sort() for v in values],
-                             FLOAT)(*values)
+                             self._results.get(name, FLOAT))(*values)
 
     def _array(self, items, element, scope):
         if element is None:

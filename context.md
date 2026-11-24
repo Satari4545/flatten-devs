@@ -93,7 +93,13 @@ system homomorphism (Zeigler, Theory of Modeling and Simulation) in
     {"mapping": {"<fused>": {"<F state variable>": <expression, or
                              {"<condition>": <expression>, ...,
                               "otherwise": <expression>}>}},
-     "invariant": ["<condition>", ...]}
+     "invariant": ["<condition>", ...],
+     "functions": {"<function>": "<result domain>", ...}}
+
+`functions` (optional) gives the result domains of the functions the
+models call; an undeclared one is assumed to return a floating_point, and
+a `/` or `%` whose meaning would depend on that (C++ divides integers
+differently) is refused.
 
 Expressions are DEVSMap over R's state: `<component id>.<variable>` (and
 `.field`; nested ids are paths, `P.L.phase`), `<component id>.e` (time
@@ -138,9 +144,10 @@ from `<coupled>_param.json` (one value per name), else any value.
 
 PROVEN assumes: exact arithmetic (real numbers, not IEEE doubles;
 signed integers without overflow); functions the models call and
-the text of numbers (`"text" + x`) are uninterpreted, so the same call
-gives the same value in both models and nothing else is known about it;
-and the generator and Cadmium run the models as encoded.
+the text of numbers (`"text" + x`) are uninterpreted and pure, so the
+same arguments give the same value at every call and in both models and
+nothing else is known about them (a call without arguments is warned
+about); and the generator and Cadmium run the models as encoded.
 
 ## Cadmium backend
 

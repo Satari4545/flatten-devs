@@ -50,8 +50,9 @@ WELL_FORMED = "0 <= e <= ta in every component"
 ASSUMPTIONS = (
     "arithmetic is exact: real numbers, not IEEE doubles; signed integers "
     "without overflow (unsigned ones wrap around as in C++)",
-    "functions the models call, and the text of numbers, are uninterpreted: "
-    "the same for both models, any value otherwise",
+    "functions the models call, and the text of numbers, are uninterpreted "
+    "and pure: the same arguments give the same value at every call and in "
+    "both models; nothing else is known about them",
     "the DEVSMap generator and Cadmium run the models as encoded: condition "
     "maps as if/else-if chains, simultaneous assignments, the default "
     "delta_con, Cadmium's bag order",
@@ -233,6 +234,7 @@ class Mapping:
             doc = devsmap.read_json(path)
             self.exprs = doc["mapping"][fused.name]
             self.invariant = doc.get("invariant", [])
+            functions = doc.get("functions", {})
         except OSError:
             raise ValueError(f"{self.where}: missing; it maps the coupled "
                              f"model's states to {fused.name}'s") from None
@@ -244,6 +246,7 @@ class Mapping:
             raise ValueError(f"{self.where}: maps {sorted(self.exprs)}, "
                              f"{fused.name}'s state variables are "
                              f"{sorted(fused.s)}")
+        within(self.where, enc.declare_functions, functions)
 
     def scope(self, s):
         names = dict(self.enc.params)
@@ -555,11 +558,17 @@ def prove(coupled_path, fused_path, prune=False):
     seconds = time.time() - started
     counts = (f"{proof.checked} obligations, {proof.vacuous} of them "
               f"vacuous; {seconds:.1f} s")
+    for name in sorted(enc.constant_calls):
+        print(f"prove: warning: {name}() takes no arguments, yet is "
+              f"assumed to return the same value at every call")
     if proof.failed:
         print(f"prove: NOT PROVEN: {len(proof.failed)} failed ({counts})")
     else:
         print(f"prove: PROVEN: {fused.name} is equivalent to "
               f"{coupled['name']} ({counts}), assuming:")
-        print("\n".join(f"- {a}" for a in ASSUMPTIONS))
+        print("\n".join(f"- {a}" for a in [*ASSUMPTIONS, *[
+            f"{name} returns a floating_point (its domain is not under "
+            f"\"functions\" in the mapping file)"
+            for name in sorted(enc.assumed)]]))
     return Report(not proof.failed, proof.failed,
                   [c for c, _ in proof.dropped], seconds)
