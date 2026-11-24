@@ -3,6 +3,8 @@
     python main.py <name>_coupled.json   fuse a coupled DEVSMap model
     python main.py <name>_coupled.json --header FILE -I DIR
                                          ... against a repo's C++ headers
+    python main.py <name>_coupled.json --prove <fused>_atomic.json [--prune]
+                                         prove a fusion equivalent (prove.py)
     python main.py --check               run the check suite (verify.py)
     python main.py --selftest            only the fuse verifier check
 """
@@ -14,6 +16,7 @@ import sys
 
 import cadmium_api
 import fuse
+import prove
 import verify
 
 
@@ -44,6 +47,13 @@ def main(argv=None):
     parser.add_argument("-I", "--include-dir", dest="include_dirs",
                         metavar="DIR", action="append", default=[],
                         help="a header search directory (repeatable)")
+    parser.add_argument("--prove", metavar="FUSED",
+                        help="instead of fusing, prove the fused atomic model "
+                             "FUSED equivalent to the coupled model, by the "
+                             "<name>_mapping.json next to FUSED")
+    parser.add_argument("--prune", action="store_true",
+                        help="with --prove: first drop the invariant "
+                             "conditions that are not inductive")
     parser.add_argument("--check", action="store_true",
                         help="run the check suite (needs g++, no API key)")
     parser.add_argument("--selftest", action="store_true",
@@ -57,11 +67,18 @@ def main(argv=None):
     flags = compiler_flags(args.header, args.include_dirs)
     if flags and not args.model:
         parser.error("--header and -I need a model path")
+    if args.prove and (flags or not args.model):
+        parser.error("--prove needs a model path, and no --header or -I")
+    if args.prune and not args.prove:
+        parser.error("--prune needs --prove")
     try:
         if args.check:
             verify.run_checks()
         elif args.selftest:
             verify.selftest()
+        elif args.prove:
+            return 0 if prove.prove(args.model, args.prove,
+                                    args.prune).proven else 1
         else:
             if flags:
                 add_compiler_flags(flags)
