@@ -301,6 +301,24 @@ def check_fuse_loop(folder):
           "a model without outputs refused")
 
 
+def check_encoding():
+    """The prover's encoding keeps C++'s corner cases: unsigned integers
+    wrap around, zeros are signed, a leading zero is octal."""
+    import z3
+    import devsmap_z3
+
+    enc = devsmap_z3.Encoding([])
+    scope = {"u": z3.Const("u", enc.sort("unsigned_integer"))}
+    for text in ["u != 0 || u - 1 == 4294967295", "u >= 0", "u <= -1",
+                 "1.0 / -0.0 == -inf", "-0.0 == 0.0", "0.0 * -1.0 == 0.0"]:
+        solver = z3.Solver()
+        solver.add(z3.Not(enc.condition(text, scope)))
+        check(solver.check() == z3.unsat, f"encoding: {text} not always true")
+    expect_error(ValueError, "leading zero", "encoding 010",
+                 enc.condition, "010 == 8", {})
+    print("encoding OK: unsigned wraparound, signed zeros, no octal literal")
+
+
 def proving(coupled, fused, prune=False):
     """(prove.prove's Report, what it printed)."""
     log = io.StringIO()
@@ -452,4 +470,5 @@ def run_checks():
                 check_prove_pingpong, check_prove_open):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             run(tmp)
+    check_encoding()
     check_prove_unknown()

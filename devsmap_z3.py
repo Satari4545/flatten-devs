@@ -9,7 +9,7 @@
     all_of, any_of, not_, ite      Boolean and if-then-else builders
     within(where, run, *args)      run, naming `where` in its ValueError
 
-Domains: integer and unsigned_integer -> Int, boolean -> Bool,
+Domains: integer -> Int, unsigned_integer -> 32-bit vector, boolean -> Bool,
 floating_point -> FLOAT (the reals plus inf, -inf and NaN), string ->
 String, a struct set of the definitions files -> a datatype (constructor
 `set(...)`, accessor `.field`), an array field -> a sequence. An input bag
@@ -20,7 +20,7 @@ chain in key order (no true key: nothing happens), a branch's assignments
 all read the state before the transition, a default delta_con is delta_int
 then delta_ext with e = 0, integer / and % truncate toward zero, and
 "text" + x joins each operand's text. Unlike C++, arithmetic is exact (real
-and integer: no rounding, overflow or wraparound). NaN keeps its sign (nan,
+and signed integer: no rounding or overflow). NaN keeps its sign (nan,
 -nan): every comparison with it is false except !=, arithmetic passes a NaN
 operand on, and an invalid operation (inf - inf, 0 * inf, 0 / 0) gives
 -nan, as on x86. A function the models call is uninterpreted and returns a
@@ -53,13 +53,12 @@ TRUE, FALSE = z3.BoolVal(True), z3.BoolVal(False)
 _ZERO = z3.RealVal(0)
 _BASIC = {
     "integer": INT, "int": INT, "long": INT, "char": INT,
-    "unsigned_integer": INT, "unsigned int": INT, "unsigned": INT,
-    "size_t": INT,
+    "unsigned_integer": z3.BitVecSort(32), "unsigned int": z3.BitVecSort(32),
+    "unsigned": z3.BitVecSort(32), "size_t": z3.BitVecSort(64),
     "floating_point": FLOAT, "double": FLOAT, "float": FLOAT,
     "boolean": BOOL, "bool": BOOL,
     "string": STRING, "std::string": STRING,
 }
-UNSIGNED = {"unsigned_integer", "unsigned int", "unsigned", "size_t"}
 _CONSTANTS = {"true": TRUE, "false": FALSE, "inf": INF,
               "nan": FLOAT.nan(FALSE)}
 
@@ -264,6 +263,17 @@ _INT_OPS = {"+": operator.add, "-": operator.sub, "*": operator.mul,
             "/": _int_div, "%": lambda a, b: a - b * _int_div(a, b),
             "<": operator.lt, ">": operator.gt, "<=": operator.le,
             ">=": operator.ge, "==": operator.eq, "!=": operator.ne}
+# Unsigned integers wrap around, as in C++.
+_UNSIGNED_OPS = {**_INT_OPS, "/": z3.UDiv, "%": z3.URem, "<": z3.ULT,
+                 ">": z3.UGT, "<=": z3.ULE, ">=": z3.UGE}
+
+
+def _unsigned(sort):
+    return isinstance(sort, z3.BitVecSortRef)
+
+
+def _numeric(sort):
+    return sort in (INT, FLOAT) or _unsigned(sort)
 
 
 def _number(text):
@@ -292,6 +302,8 @@ def _plain(v):
 def sort_name(sort):
     if sort == FLOAT:
         return "floating_point"
+    if _unsigned(sort):
+        return f"{sort.size()}-bit unsigned integer"
     if isinstance(sort, z3.SeqSortRef) and not sort == STRING:
         return f"array of {sort_name(sort.basis())}"
     return {INT: "integer", BOOL: "boolean", STRING: "string"}.get(
@@ -363,19 +375,29 @@ class Encoding:
         have = _plain(v).sort()
         if have == sort:
             return v
-        if have == BOOL and sort in (INT, FLOAT):
+        if have == BOOL and _numeric(sort):
             return self.convert(z3.If(v, z3.IntVal(1), z3.IntVal(0)), sort)
-        if have == INT and sort == FLOAT:
-            return fin(z3.ToReal(v))
-        if have == INT and sort == BOOL:
-            return v != 0
-        if have == FLOAT and sort == BOOL:
-            return not_(f_eq(v, fin(0)))
-        if have == FLOAT and sort == INT:
+        if sort == BOOL and _numeric(have):
+            return not_(f_eq(v, fin(0))) if have == FLOAT else v != 0
+        if sort == FLOAT and have != FLOAT and _numeric(have):
+            return fin(z3.ToReal(v if have == INT else z3.BV2Int(v)))
+        if sort == INT and have == FLOAT:
             x = _real(v)
             truncated = z3.If(x >= 0, z3.ToInt(x), -z3.ToInt(-x))
             undefined = self.function("float_to_int", [FLOAT], INT)(v)
             return ite(_finite(v), truncated, undefined)
+        if sort == INT and _unsigned(have):
+            low = v if have.size() <= 32 else z3.Extract(31, 0, v)
+            return z3.BV2Int(low, is_signed=True)
+        if _unsigned(sort) and _unsigned(have):
+            n, m = sort.size(), have.size()
+            return z3.ZeroExt(n - m, v) if n > m else z3.Extract(n - 1, 0, v)
+        if _unsigned(sort) and _numeric(have):
+            x = self.convert(v, INT)
+            if z3.is_int_value(x):
+                return z3.BitVecVal(x.as_long() % 2 ** sort.size(),
+                                    sort.size())
+            return z3.Int2BV(x, sort.size())
         raise ValueError(f"a {sort_name(have)} where a {sort_name(sort)} is "
                          f"expected")
 
@@ -468,9 +490,10 @@ class Encoding:
         return z3.Concat(units) if len(units) > 1 else units[0]
 
     def _negate(self, v):
-        if _plain(v).sort() == FLOAT:
+        sort = _plain(v).sort()
+        if sort == FLOAT:
             return f_neg(v)
-        return -self.convert(v, INT)
+        return -v if _unsigned(sort) else -self.convert(v, INT)
 
     def _text(self, part, scope):
         """std::to_string of one operand of a "text" + x chain."""
@@ -480,7 +503,7 @@ class Encoding:
             return v
         if sort == BOOL:
             return z3.If(v, z3.StringVal("1"), z3.StringVal("0"))
-        if sort in (INT, FLOAT):
+        if _numeric(sort):
             return self.function("to_string", [sort], STRING)(v)
         raise ValueError(f"the text of a {sort_name(sort)}")
 
@@ -489,20 +512,23 @@ class Encoding:
         if op in ("&&", "||"):
             a, b = self.convert(a, BOOL), self.convert(b, BOOL)
             return all_of(a, b) if op == "&&" else any_of(a, b)
-        numeric = (INT, FLOAT, BOOL)
-        if a.sort() not in numeric or b.sort() not in numeric \
-                or a.sort() == b.sort() == BOOL:
-            if a.sort() == b.sort() == STRING and op == "+":
+        sorts = (a.sort(), b.sort())
+        if not all(_numeric(s) or s == BOOL for s in sorts) \
+                or sorts == (BOOL, BOOL):
+            if sorts == (STRING, STRING) and op == "+":
                 return z3.Concat(a, b)
-            if a.sort() == b.sort() and op in ("==", "!="):
+            if sorts[0] == sorts[1] and op in ("==", "!="):
                 return a == b if op == "==" else a != b
             raise ValueError(f"{sort_name(a.sort())} {op} "
                              f"{sort_name(b.sort())}")
-        sort = FLOAT if FLOAT in (a.sort(), b.sort()) else INT
+        # C++'s usual arithmetic conversions: double, else unsigned, else int
+        words = [s for s in sorts if _unsigned(s)]
+        sort = FLOAT if FLOAT in sorts else max(
+            words, key=lambda s: s.size()) if words else INT
         a, b = self.convert(a, sort), self.convert(b, sort)
         if sort == FLOAT:
             return _float_op(op, a, b)
-        return _INT_OPS[op](a, b)
+        return (_UNSIGNED_OPS if words else _INT_OPS)[op](a, b)
 
     def branches(self, cmap, scope):
         """[(label, guard, body)]: each leaf of a (possibly nested)
@@ -657,6 +683,8 @@ def show(v):
         return json.dumps(v.as_string())
     if z3.is_int_value(v) or z3.is_true(v) or z3.is_false(v):
         return str(v).lower()
+    if z3.is_bv_value(v):
+        return str(v.as_long())
     if isinstance(sort, z3.SeqSortRef):
         return f"[{', '.join(show(x) for x in _elements(v))}]"
     if isinstance(sort, z3.DatatypeSortRef) and z3.is_app(v):

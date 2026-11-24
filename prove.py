@@ -24,7 +24,7 @@ obligation for all values at once:
 
 R's state is each component's variables and elapsed time e. Besides the
 given invariant, every reachable state has 0 <= e <= ta (ta not NaN) per
-component and unsigned variables >= 0; this is proven too. R's output is
+component; this is proven too. R's output is
 what its eoc sends, in Cadmium's order; a model without ports outputs every
 component's messages, as "<id>:<value>" and as a multiset, as fuse
 compares. With prune, invariant conditions that are false initially or not
@@ -40,16 +40,16 @@ import z3
 
 import devsmap
 import devsmap_flatten
-from devsmap_z3 import (FALSE, STRING, UNSIGNED, Atomic, Encoding, all_of,
-                        any_of, f_arith, f_eq, f_le, f_lt, f_min, fin, ite,
-                        show, within)
+from devsmap_z3 import (FALSE, STRING, Atomic, Encoding, all_of, any_of,
+                        f_arith, f_eq, f_le, f_lt, f_min, fin, ite, show,
+                        within)
 
 QUERY_TIMEOUT = 600  # seconds per Z3 query
 EVENTS = {"int": "internal", "ext": "external", "con": "confluent"}
-WELL_FORMED = "0 <= e <= ta in every component, unsigned variables >= 0"
+WELL_FORMED = "0 <= e <= ta in every component"
 ASSUMPTIONS = (
-    "arithmetic is exact: real numbers, not IEEE doubles; integers without "
-    "overflow or unsigned wraparound",
+    "arithmetic is exact: real numbers, not IEEE doubles; signed integers "
+    "without overflow (unsigned ones wrap around as in C++)",
     "functions the models call, and the text of numbers, are uninterpreted: "
     "the same for both models, any value otherwise",
     "the DEVSMap generator and Cadmium run the models as encoded: condition "
@@ -135,13 +135,10 @@ class Resultant:
         return result
 
     def well_formed(self, s):
-        """0 <= e <= ta (ta not NaN) and unsigned variables >= 0."""
-        found = []
-        for cid, a in self.parts.items():
-            found += [s.e[cid] >= 0, f_le(fin(s.e[cid]), a.ta(s.vars[cid]))]
-            found += [s.vars[cid][v] >= 0
-                      for v, d in a.body["s"].items() if d in UNSIGNED]
-        return all_of(*found)
+        """0 <= e <= ta in every component (ta not NaN)."""
+        return all_of(*[all_of(s.e[cid] >= 0,
+                               f_le(fin(s.e[cid]), a.ta(s.vars[cid])))
+                        for cid, a in self.parts.items()])
 
     def event(self, s, kind, t, inputs):
         """The event of `kind` after elapsed time t, with these input bags.

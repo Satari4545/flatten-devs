@@ -99,7 +99,7 @@ Expressions are DEVSMap over R's state: `<component id>.<variable>` (and
 `.field`; nested ids are paths, `P.L.phase`), `<component id>.e` (time
 since its last transition), parameters, and `ta` (R's time advance). The
 invariant describes R's reachable states; `0 <= e <= ta` per component
-and unsigned variables `>= 0` are added to it. One Z3 query per
+is added to it. One Z3 query per
 obligation (UNSAT is proven), split per F branch:
 
 - init: the invariant holds in R's initial state; h maps it to F's.
@@ -131,11 +131,13 @@ reals plus -0.0, inf, -inf and NaN. Zeros keep IEEE's signs (`1.0 /
 -0.0` is -inf, `-0.0 == 0.0`); NaN keeps its sign (`nan`, `-nan`), every
 comparison with it is false except `!=`, arithmetic passes a NaN operand
 on, and an invalid operation (inf - inf, 0 * inf) gives -nan, as on x86.
-Structs are datatypes, arrays and bags sequences. Parameter values come
+Unsigned integers are 32-bit words (`size_t` 64) that wrap around as in
+C++, so `u - 1` at 0 is 4294967295 and `u < 0` never holds. Structs are
+datatypes, arrays and bags sequences. Parameter values come
 from `<coupled>_param.json` (one value per name), else any value.
 
-PROVEN assumes: exact arithmetic (real numbers, not IEEE doubles; no
-integer overflow or unsigned wraparound); functions the models call and
+PROVEN assumes: exact arithmetic (real numbers, not IEEE doubles;
+signed integers without overflow); functions the models call and
 the text of numbers (`"text" + x`) are uninterpreted, so the same call
 gives the same value in both models and nothing else is known about it;
 and the generator and Cadmium run the models as encoded.
