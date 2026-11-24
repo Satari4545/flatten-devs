@@ -52,6 +52,8 @@ class _Parser:
             if not match:
                 self.fail(f"unexpected character {text[pos:].strip()[0]!r}")
             num, string, name, op = match.groups()
+            if num and re.fullmatch(r"0\d+", num):
+                self.fail(f"{num} has a leading zero (octal in C++)")
             self.tokens.append(("num", num) if num else
                                ("str", _unescape(string)) if string else
                                ("name", name) if name else ("op", op))
