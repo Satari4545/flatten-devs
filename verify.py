@@ -154,6 +154,18 @@ def check_arithmetic(folder):
     print("generator arithmetic OK: 1.0/2.0 is 0.5")
 
 
+def check_message_list(folder):
+    """A list on a lambda port sends one message per element, in order."""
+    burst = write_model(folder, "burst", timer_body(**{"lambda": {
+        "sigma == 1.0": {"out": ["0.5", "0.25"]}, "otherwise": {}}}),
+        {"sigma": "1.0"})
+    got = [(e["time"], e["port"], e["value"])
+           for e in cadmium_api.simulate(burst, 2.0)]
+    check(got == [(1.0, "out", "0.5"), (1.0, "out", "0.25")],
+          f"lambda list: {got}")
+    print("lambda list OK: [0.5, 0.25] on one port sends both at t = 1.0")
+
+
 def check_stray_files(folder):
     """Unrelated model files next to the simulated one are ignored."""
     for name in os.listdir(MODELS):
@@ -256,7 +268,7 @@ def selftest():
 def run_checks():
     check_flatten()
     check_coupled_trace()
-    for run in (check_arithmetic, check_stray_files):
+    for run in (check_arithmetic, check_message_list, check_stray_files):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             run(tmp)
     check_fuse_verifier()
