@@ -49,9 +49,10 @@ what happens when it holds.
 ### Transitions
 
 `delta_int`, `delta_ext` and `delta_con` map each condition to assignments
-`{"<state variable>": "<expression>"}`. A state variable left out keeps its
-value (`{}` changes nothing). An expression never reads a variable assigned
-in the same branch: write it in terms of the old state and the input bags.
+`{"<state variable>": "<expression>"}`. All assignments of a branch happen
+at once: every expression reads the state before the transition
+(`{"a": "b", "b": "a"}` swaps `a` and `b`), and a state variable left out
+keeps its value (`{}` changes nothing).
 
 `delta_con` (input arriving exactly when the model is imminent) is always
 written out in full, never as just `{"otherwise": {}}`. A model without a
