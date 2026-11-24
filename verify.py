@@ -1,9 +1,11 @@
-"""Check suite for flattening, the Cadmium backend and the fuse loop.
+"""Check suite for flattening, the Cadmium backend, the fuse loop and the
+prover.
 
     run_checks()  every check (python main.py --check)
     selftest()    the fuse verifier on the hand fusion (main.py --selftest)
 
-A failed check raises CheckFailed. Needs g++; the LLM is stubbed.
+A failed check raises CheckFailed. Needs g++ and z3-solver; the LLM is
+stubbed.
 """
 
 import contextlib
@@ -19,6 +21,7 @@ import cadmium_api
 import devsmap
 import devsmap_flatten
 import fuse
+import prove
 
 REPO = os.path.dirname(os.path.abspath(__file__))
 MODELS = os.path.join(REPO, "devsmap")
@@ -26,6 +29,7 @@ FIXTURES = os.path.join(REPO, "fixtures")
 COUPLED = os.path.join(MODELS, "pingpong_coupled.json")
 HAND_FUSED = os.path.join(FIXTURES, "fused_pingpong_atomic.json")
 HAND_FUSED_INIT = os.path.join(FIXTURES, "fused_pingpong_init_state.json")
+HAND_MAPPING = os.path.join(FIXTURES, "fused_pingpong_mapping.json")
 
 
 class CheckFailed(Exception):
@@ -134,6 +138,30 @@ def check_flatten():
     check(phases == ["\"Send\"", "\"Wait\""],
           f"flatten: initial phases {phases}")
     print("flatten OK: A, B + 2 couplings, per-instance initial states")
+
+
+def check_bag_order(folder):
+    """A nested leaf's input bag: its level's ic sources, then each eic's
+    (whose bag holds the outer ic sources, then the model's input)."""
+    cell = {"x": {"i": "int"}, "y": {"o": "int"}, "s": {}}
+    write_model(folder, "cell", cell, {})
+    write_model(folder, "inner", {
+        "x": {"q": "int"}, "y": {}, "components": {"cell": ["L", "M"]},
+        "eic": [{"port_from": "q", "component_to": "L", "port_to": "i"}],
+        "ic": [{"component_from": "M", "port_from": "o", "component_to": "L",
+                "port_to": "i"}], "eoc": []}, {}, kind="coupled")
+    outer = write_model(folder, "outer", {
+        "x": {"r": "int"}, "y": {}, "components": {"inner": "P", "cell": "N"},
+        "eic": [{"port_from": "r", "component_to": "P", "port_to": "q"}],
+        "ic": [{"component_from": "N", "port_from": "o", "component_to": "P",
+                "port_to": "q"}], "eoc": []},
+        {"P": {"L": {}, "M": {}}, "N": {}}, kind="coupled")
+    bag = devsmap_flatten.flatten(devsmap.load_model(outer))["bags"][
+        ("P.L", "i")]
+    check(bag == [("P.M", "o"), ("N", "o"), (None, "r")],
+          f"bag order: P.L.i gets {bag}")
+    print("bag order OK: a nested input port gets its own level's "
+          "couplings first, then the outer ones, then the model's input")
 
 
 def check_coupled_trace():
@@ -273,18 +301,142 @@ def check_fuse_loop(folder):
           "a model without outputs refused")
 
 
+def proving(coupled, fused, prune=False):
+    """(prove.prove's Report, what it printed)."""
+    log = io.StringIO()
+    with contextlib.redirect_stdout(log):
+        report = prove.prove(coupled, fused, prune)
+    return report, log.getvalue()
+
+
+def hand_fusion_variant(folder, change, invariant=()):
+    """The hand fusion and its mapping, written to a new folder in `folder`
+    after change(body) and with more invariant conditions."""
+    folder = tempfile.mkdtemp(dir=folder)
+    body, init = hand_fused()
+    change(body)
+    path = write_model(folder, "fused_pingpong", body, init)
+    mapping = devsmap.read_json(HAND_MAPPING)
+    mapping["invariant"] += invariant
+    devsmap.write_json(os.path.join(folder, "fused_pingpong_mapping.json"),
+                       mapping)
+    return path
+
+
+def check_prove_pingpong(folder):
+    report, text = proving(COUPLED, HAND_FUSED)
+    check(report.proven, f"prove: the hand fusion is not proven:\n{text}")
+
+    def wrong_sender(body):
+        body["lambda"]["otherwise"]["send"] = "\"A:ball\""
+
+    def ball_stays(body):
+        body["delta_int"]["otherwise"]["B"] = "\"Ball\""
+
+    for change, expected in [
+            (wrong_sender, 'output on send: expected ["B:ball"], '
+                           'got ["A:ball"]'),
+            (ball_stays, 'fused B: expected "NoBall", got "Ball"')]:
+        report, text = proving(COUPLED,
+                               hand_fusion_variant(folder, change))
+        check(not report.proven and expected in text,
+              f"prove: no counterexample with {expected!r}:\n{text}")
+
+    stuck = 'A.phase == "Send"'
+    path = hand_fusion_variant(folder, lambda body: None, [stuck])
+    report, text = proving(COUPLED, path)
+    check(report.failed == ["invariant kept by internal events"]
+          and f"breaks: {stuck}" in text,
+          f"prove: the non-inductive {stuck} is not reported:\n{text}")
+    report, text = proving(COUPLED, path, prune=True)
+    check(report.proven and report.dropped == [stuck],
+          f"prove --prune: {stuck} not dropped:\n{text}")
+    print("prove OK: the hand fusion is proven; a wrong sender and a wrong "
+          "next phase get counterexamples; a non-inductive invariant "
+          "condition is reported, and --prune drops it")
+
+
+COUNTER = {  # SKILL.md's counter: ticks every 1.0, adds what arrives
+    "x": {"add": "int"}, "y": {"out": "int"},
+    "s": {"count": "int", "sigma": "double"},
+    "delta_int": {"otherwise": {"count": "count + 1", "sigma": "1.0"}},
+    "delta_ext": {
+        "add.bagSize() != 0": {"count": "count + add.bag(-1)",
+                               "sigma": "sigma - e"},
+        "otherwise": {"sigma": "sigma - e"}},
+    "delta_con": {
+        "add.bagSize() != 0": {"count": "count + 1 + add.bag(-1)",
+                               "sigma": "1.0"},
+        "otherwise": {"count": "count + 1", "sigma": "1.0"}},
+    "lambda": {"otherwise": {"out": "count"}},
+    "ta": {"otherwise": "sigma"},
+}
+
+
+def fused_counter(first):
+    """The counter with input ports a and b; when both have messages it adds
+    the last one of `first`."""
+    ports = [first, "b" if first == "a" else "a"]
+
+    def by_port(assign):
+        return {**{f"{p}.bagSize() != 0": assign(f"{p}.bag(-1)")
+                   for p in ports}, "otherwise": assign(None)}
+
+    return {**COUNTER, "x": {"a": "int", "b": "int"},
+            "delta_ext": by_port(lambda last: {
+                **({"count": f"count + {last}"} if last else {}),
+                "sigma": "sigma - e"}),
+            "delta_con": by_port(lambda last: {
+                "count": f"count + 1 + {last}" if last else "count + 1",
+                "sigma": "1.0"})}
+
+
+def check_prove_open(folder):
+    """An open model whose ports a and b both feed one input port: its bag
+    holds a's messages, then b's (eic order), under external and confluent
+    events."""
+    start = {"count": "0", "sigma": "1.0"}
+    write_model(folder, "counter", COUNTER, start)
+    coupled = write_model(folder, "counting", {
+        "x": {"a": "int", "b": "int"}, "y": {"out": "int"},
+        "components": {"counter": "C"},
+        "eic": [{"port_from": p, "component_to": "C", "port_to": "add"}
+                for p in "ab"],
+        "eoc": [{"component_from": "C", "port_from": "out",
+                 "port_to": "out"}], "ic": []}, {"C": start}, kind="coupled")
+    reports = {}
+    for first in "ba":
+        sub = tempfile.mkdtemp(dir=folder)
+        fused = write_model(sub, "fused_counting", fused_counter(first), start)
+        devsmap.write_json(os.path.join(sub, "fused_counting_mapping.json"), {
+            "mapping": {"fused_counting": {"count": "C.count",
+                                           "sigma": "ta"}}})
+        reports[first] = proving(coupled, fused)
+    check(reports["b"][0].proven,
+          f"prove: the open counter is not proven:\n{reports['b'][1]}")
+    failed = sorted({name.split(" on ")[0] for name in reports["a"][0].failed})
+    check(failed == ["delta_con", "delta_ext"],
+          f"prove: adding a's message instead of b's fails {failed}:\n"
+          f"{reports['a'][1]}")
+    print("prove OK: an open model, its two eics into one port in bag "
+          "order, external and confluent events")
+
+
 def selftest():
     check_fuse_verifier()
 
 
 def run_checks():
     check_flatten()
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        check_bag_order(tmp)
     check_coupled_trace()
     for run in (check_arithmetic, check_message_list,
                 check_simultaneous_assignments, check_stray_files):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             run(tmp)
     check_fuse_verifier()
-    for run in (check_reference_window, check_fuse_loop):
+    for run in (check_reference_window, check_fuse_loop,
+                check_prove_pingpong, check_prove_open):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             run(tmp)
