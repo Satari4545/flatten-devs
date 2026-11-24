@@ -303,6 +303,7 @@ class _Proof:
         self.hs = h(self.s)
         self.t = z3.Real("t")
         self.failed, self.dropped = [], []
+        self.checked = self.vacuous = 0
         inputs = {p: z3.Const(p, z3.SeqSort(sort))
                   for p, sort in resultant.x.items()}
         none = {p: z3.Empty(z3.SeqSort(sort))
@@ -333,11 +334,17 @@ class _Proof:
         return status, m, [c for c, g in after.items()
                            if z3.is_false(m.eval(g, True))]
 
-    def report(self, name, status, detail):
+    def report(self, name, status, detail, premise):
         """Print an obligation's result; detail is a counterexample's lines
-        if it failed, why Z3 gave up if unknown."""
+        if it failed, why Z3 gave up if unknown. A proven obligation whose
+        premise no state satisfies is marked vacuous."""
+        self.checked += 1
         if status == "proven":
-            print(f"prove: {name}: proven")
+            vacuous = _query(premise, FALSE)[0] == "proven"
+            self.vacuous += vacuous
+            print(f"prove: {name}: proven"
+                  + (" (vacuously: the invariant rules it out)"
+                     if vacuous else ""))
             return
         self.failed.append(name)
         if status == "unknown":
@@ -410,7 +417,7 @@ class _Proof:
         detail = [f"  invariant false initially: {c}" for c in false]
         if status == "failed":
             detail += self.differences(m, init, mapped, "fused initial")
-        self.report("init", "failed" if detail else "proven", detail)
+        self.report("init", "failed" if detail else "proven", detail, [])
 
     def check_inductive(self, conditions):
         for event in self.events:
@@ -421,7 +428,8 @@ class _Proof:
                           *self.state_lines(m, event.after),
                           *[f"  breaks: {c}" for c in broken]]
             self.report(f"invariant kept by {EVENTS[event.kind]} events",
-                        status, detail)
+                        status, detail,
+                        [self.invariant(conditions, self.s), event.holds])
 
     def check_ta(self, conditions):
         want, got = self.r.ta(self.s), self.f.ta(self.hs)
@@ -466,7 +474,8 @@ class _Proof:
 
     def check(self, name, premise, goal, explain):
         status, m = _query(premise, goal)
-        self.report(name, status, explain(m) if status == "failed" else m)
+        self.report(name, status, explain(m) if status == "failed" else m,
+                    premise)
 
 
 def _parameters(enc, coupled, fused):
@@ -536,12 +545,13 @@ def prove(coupled_path, fused_path, prune=False):
     proof.check_transitions(conditions)
 
     seconds = time.time() - started
+    counts = (f"{proof.checked} obligations, {proof.vacuous} of them "
+              f"vacuous; {seconds:.1f} s")
     if proof.failed:
-        print(f"prove: NOT PROVEN: {len(proof.failed)} obligation(s) failed "
-              f"({seconds:.1f} s)")
+        print(f"prove: NOT PROVEN: {len(proof.failed)} failed ({counts})")
     else:
         print(f"prove: PROVEN: {fused.name} is equivalent to "
-              f"{coupled['name']} ({seconds:.1f} s), assuming:")
+              f"{coupled['name']} ({counts}), assuming:")
         print("\n".join(f"- {a}" for a in ASSUMPTIONS))
     return Report(not proof.failed, proof.failed,
                   [c for c, _ in proof.dropped], seconds)
