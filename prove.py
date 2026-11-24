@@ -320,9 +320,16 @@ class _Proof:
     def invariant(self, conditions, s):
         return all_of(*self.parts(conditions, s).values())
 
-    def false_initially(self, conditions):
-        return [c for c, g in self.parts(conditions, self.r.initial()).items()
-                if _query([], g)[0] != "proven"]
+    def not_initially(self, conditions):
+        """[(condition, why)]: the invariant's conditions not proven in R's
+        initial state."""
+        found = []
+        for c, g in self.parts(conditions, self.r.initial()).items():
+            status, why = _query([], g)
+            if status != "proven":
+                found.append((c, "false" if status == "failed"
+                              else f"unknown to Z3 ({why})"))
+        return found
 
     def broken(self, conditions, event):
         """(status, model, the conditions the event breaks in it)."""
@@ -398,7 +405,8 @@ class _Proof:
                 print(f"prove: prune: dropped {c} ({why})")
             return bool(found)
 
-        drop(self.false_initially(alive), "false initially")
+        drop([c for c, _ in self.not_initially(alive)],
+             "not proven initially")
         changed = True
         while changed:
             changed = False
@@ -411,12 +419,15 @@ class _Proof:
         return alive
 
     def check_init(self, init, conditions):
-        false = self.false_initially(conditions)
+        detail = [f"  invariant {why} initially: {c}"
+                  for c, why in self.not_initially(conditions)]
         mapped = self.h(self.r.initial())
         status, m = _query([], all_of(*[mapped[v] == init[v] for v in init]))
-        detail = [f"  invariant false initially: {c}" for c in false]
         if status == "failed":
             detail += self.differences(m, init, mapped, "fused initial")
+        elif status == "unknown":
+            detail.append(f"  h(R's initial state) = F's initial state: "
+                          f"unknown to Z3 ({m})")
         self.report("init", "failed" if detail else "proven", detail, [])
 
     def check_inductive(self, conditions):

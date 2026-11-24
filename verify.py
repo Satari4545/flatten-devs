@@ -356,6 +356,18 @@ def check_prove_pingpong(folder):
           "condition is reported, and --prune drops it")
 
 
+def check_prove_unknown():
+    """Z3 giving up is never a proof, the initial state included."""
+    with mock.patch.object(prove, "_query",
+                           lambda premises, goal: ("unknown", "stubbed")):
+        report, text = proving(COUPLED, HAND_FUSED)
+    check(not report.proven and "init" in report.failed
+          and "unknown to Z3 (stubbed)" in text,
+          f"prove: Z3 giving up on the initial state is not a failure:\n"
+          f"{text}")
+    print("prove OK: an obligation Z3 gives up on is not proven")
+
+
 COUNTER = {  # SKILL.md's counter: ticks every 1.0, adds what arrives
     "x": {"add": "int"}, "y": {"out": "int"},
     "s": {"count": "int", "sigma": "double"},
@@ -440,3 +452,4 @@ def run_checks():
                 check_prove_pingpong, check_prove_open):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             run(tmp)
+    check_prove_unknown()
