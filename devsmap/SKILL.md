@@ -1,128 +1,125 @@
 # DEVSMap atomic models
 
-How to write a DEVSMap atomic model (Govind, Cardenas & Wainer, "DEVSMAP:
-On the Path of Standardized DEVS Model Representation") that the
-DEVSMap_to_Cadmium generator translates correctly. Proposals are not
-checked up front: breaking these rules fails in the generator, the C++
-compiler or the simulation, and that tool's output comes back as the error.
+How to write a DEVSMap atomic model in the format of Govind, Cardenas &
+Wainer, "DEVSMAP: On the Path of Standardized DEVS Model Representation".
+Proposals are not checked up front: breaking these rules fails in the
+generator, the C++ compiler or the simulation, and that tool's output comes
+back as the error.
 
 ## Files
 
 An atomic model named `<name>` is two files:
 
-- `<name>_atomic.json`: `{"<name>": { ...model body... }}`, the model
-  name as the only top-level key.
-- `<name>_init_state.json`: `{"init_states": {"<name>": {"<var>": "<value>"}}}`,
-  setting every state variable and nothing else.
+- `<name>_atomic.json`, with exactly three top-level keys:
+  `{"<name>": {...}, "parameters": {...}, "include_sets": [...]}`.
+  `parameters` maps each parameter to its domain (`{}` if none);
+  `include_sets` lists the definitions files of the sets the domains use
+  (`[]` if none). A fused model's `parameters` is the union of the input
+  atomics' parameters, and its `include_sets` lists the input models'
+  definitions files its domains need.
+- `<name>_init_state.json`:
+  `{"init_states": {"<name>": {"<state variable>": "<value>"}}}`, setting
+  every state variable, and nothing else, to a constant.
 
-The atomic file never sets initial state (there is no `"initial"` key).
+## Model
 
-## Model body
-
-The DEVS octuple, with exactly these keys:
+The model object has all eight keys of the DEVS octuple:
 
 `x`, `y`, `s`, `delta_int`, `delta_ext`, `delta_con`, `lambda`, `ta`
 
-- `x`, `y`, `s` map input ports, output ports and state variables to
-  their C++ type: `double`, `int`, `bool` or `std::string`, or a type
-  the coupled model already uses (see "Other C++ types").
-- `delta_int`, `delta_ext` and `lambda` are condition maps: keys are
-  conditions (boolean expressions), values are assignment maps
-  `{<target>: <expression>}`. Transitions assign state variables,
-  `lambda` assigns output ports. A condition map has at least one
-  branch; branches are tried top to bottom and the first match wins.
-  An optional `"otherwise"` entry (at most one, last) is the `else`.
-  An empty assignment map `{}`, or no matching branch, means "no change"
-  (for `lambda`, "no output"). The assignments of a branch run top to
-  bottom, so a later expression sees the values assigned before it
-  (`{"a": "b", "b": "a"}` sets both to the old `b`).
-- `ta` is exactly `{"otherwise": "<state variable>"}`: the time advance
-  is one `double` state variable (e.g. `sigma`). A passive state sets
-  that variable to `inf`.
-- `delta_con` is `{"otherwise": {}}` for the default (the internal
-  transition, then the external one), or else a condition map like
-  `delta_ext`, used when an input arrives exactly when the model is
-  imminent.
+`x`, `y` and `s` map input ports, output ports and state variables to their
+domains. Copy every domain exactly as the input models write it, set name or
+type name alike, and never convert between the two; a new variable takes
+the domain the input models use for such values. The paper's basic sets are
+`integer`, `unsigned_integer`, `floating_point`, `boolean` and `char`;
+other sets (e.g. `string` or a struct) come from the input models'
+definitions files.
 
-Output values assigned by `lambda` are plain values of the port's type
-(e.g. `"ball"`). Never encode a sender or component id inside a value --
-with one exception: a *fused* atomic (the output of closure under
-coupling) MUST prefix each output value with the originating component
-id (`"<id>:<value>"`, e.g. `"P01:ball"`), so component identity survives
-in the observable trace and the verifier can check which component
-emitted each output.
+The other five keys are condition maps: each key is a condition, each value
+what happens when it holds.
 
-Initial values are constants: for `double` a real number written with a
-decimal point (`"0.1"`, `"-2.0"`) or `"inf"`; for `std::string` a string
-literal (`"\"Send\""`).
+- Flat: no condition map inside another.
+- For any state and input bags, exactly one key is true; key order means
+  nothing. Write priority as explicit guards that repeat the negations of
+  the higher-priority conditions: `"stop.bagSize() != 0"`, then
+  `"stop.bagSize() == 0 && add.bagSize() != 0"`.
+- Every map has exactly one `"otherwise"` (true when no other key is), last,
+  even when its value is empty.
+
+### Transitions
+
+`delta_int`, `delta_ext` and `delta_con` map each condition to assignments
+`{"<state variable>": "<expression>"}`. A state variable left out keeps its
+value (`{}` changes nothing). An expression never reads a variable assigned
+in the same branch: write it in terms of the old state and the input bags.
+
+`delta_con` (input arriving exactly when the model is imminent) is always
+written out in full, never as just `{"otherwise": {}}`. A model without a
+confluent function of its own (an input model with no `delta_con`, or just
+`{"otherwise": {}}`) uses the default: the internal transition, then the
+external transition with `e = 0`. Compose the two for every phase that can
+be confluent, in terms of the old state: where the external part reads a
+variable the internal part assigns, use that assignment's expression. A
+counter that ticks every 1.0 and adds what arrives on `add`:
+
+    "delta_int": {"otherwise": {"count": "count + 1", "sigma": "1.0"}},
+    "delta_ext": {
+      "add.bagSize() != 0": {"count": "count + add.bag(-1)", "sigma": "sigma - e"},
+      "otherwise": {"sigma": "sigma - e"}},
+    "delta_con": {
+      "add.bagSize() != 0": {"count": "count + 1 + add.bag(-1)", "sigma": "1.0"},
+      "otherwise": {"count": "count + 1", "sigma": "1.0"}}
+
+### Output and time advance
+
+`lambda` keys are conditions on the state only; each value maps output
+ports to one expression each (`{}` sends nothing). `lambda` never changes
+the state: a value that is sent and also needed later is computed and
+stored by a transition, and `lambda` only reads it.
+
+`ta` is `{"otherwise": "sigma"}`: one floating-point state variable holds
+the time advance and is `inf` while the model is passive.
 
 ## Expressions
 
-Expressions are JSON strings. A condition is boolean; an assignment's
-expression has the type of its target. Tokens are separated by spaces
-only (no tabs or newlines). An expression may use:
+Keys and values are JSON strings, each a single expression on one line: no
+statement blocks, no assignments, no side effects. An expression may use:
 
-- the model's state variables;
-- real numbers with a decimal point: `0.1`, `2.0` (never `2`: an integer
-  literal does integer arithmetic in C++);
-- string literals of letters, digits and `_ . : -` (no spaces), e.g.
-  `"Send"`;
-- for `double`: `+ - * /`, unary `-`, comparisons `== != < <= > >=`; two
-  `-` are always separated by a space (`- -c`, `a - -b`: C++ reads
-  `--` as its decrement operator);
-- for `std::string`: `==` and `!=`, with a string variable on at least one
-  side (two literals would compare pointers in C++);
-- for conditions: `&& || !`; parentheses anywhere; at most one
-  comparison per operand (`a < b < c` is not allowed);
-- `e` (elapsed time since the last transition), only in `delta_ext` and
-  `delta_con`;
-- `inf` (infinity), only as a whole value: an initial value or the
-  entire right-hand side of a `delta_int` assignment (`"sigma": "inf"`);
+- state variables, parameters, and `var.field` for a field of a struct;
+- `e` (the time since the last transition), only in `delta_ext`;
 - input ports, only in `delta_ext` and `delta_con`, and only through the
-  bag operators,
-  written exactly `p.bagSize() != 0` or `p.bagSize() == 0` (in
-  conditions) and `p.bag(-1)` (the most recent value) or `p.bag(0)` (the
-  first value), in assignments. A branch reads either only when `p`
-  surely holds a value: `p` is the model's only input port, or the
-  branch's condition has `p.bagSize() != 0` as a top-level `&&` term
-  (not negated, not in parentheses, no `||` outside parentheses), e.g.
-  `"p.bagSize() != 0 && sigma > 0.0 "`.
+  bag operators: `p.bagSize()`, and `p.bag(i)` or `p.bag(i).field` with a
+  Python-style index (`p.bag(0)` is the first message, `p.bag(-1)` the
+  last). A branch reads `p.bag(i)` only when its condition makes sure the
+  message exists (e.g. `p.bagSize() != 0` as an `&&` term);
+- the operators `== != <= >= < > && || ( ) + - * / %`, at most one
+  comparison per operand (no `a < b < c`) and two `-` always separated by a
+  space (`a - -b`); `"text" + number` builds a string;
+- values: numbers (a floating-point value has a decimal point, `2.0`; an
+  integer has none, `2`), `true`, `false`, `inf`, `-nan`, string literals
+  (`"Wait"`), arrays `[a, b, c]`, and struct values `set_name(v1, ..., vn)`
+  giving every field in the order of the set's definitions file;
+- functions the input models already call. Never invent a function.
 
-A state variable is always followed by a space unless it is the last
-token of an assignment (the generator finds state variables by text
-replacement): write `"( sigma + 0.1 ) / 2.0"` and `"0.1 < sigma "`, not
-`"(sigma+0.1)/2.0"` or `"0.1 < sigma"`.
+There is no `!` (write the opposite comparison: `p.bagSize() == 0`,
+`phase != "Wait"`), no `?:`, no cast, no method other than the bag
+operators, and no C++.
 
-## Other C++ types
-
-Keep any other C++ type the coupled model uses (a struct like
-`position_t`, `uint8_t`, `float`). Then:
-
-- Write a struct member as `var .field`, with a space before the dot
-  (the generator adds `state.` only to a state variable followed by a
-  space or `;`).
-- Expressions and initial values may use constructors, functions, macros
-  and constants from the model's own C++ headers (e.g.
-  `"position_t()"`). No state variable name may be the
-  ending of these names or of a member name.
-- An expression is a single expression: no statement blocks (no
-  `[&] { ... }()`), no assignments to other variables, no `addMessage`.
-  Computation that needs statements is a named function in the model's
-  headers, called by name.
-- A phase is a `std::string`, never an `enum class`: the generated
-  `operator<<` prints every state variable.
+A phase (an enumeration) is a string literal on a state variable of the
+input models' string domain: the condition `phase == "Wait"`, the
+assignment `"phase": "\"Send\""` (JSON escapes the quotes).
 
 ## Names
 
-Names (the model, ports, state variables) are identifiers: letters,
-digits and `_`, not starting with a digit or `_`, without `__`, and not
-ending in `State` (the generator names each atomic's state struct
-`<model>State`). In addition:
+Names (the model, ports, state variables) are identifiers: letters, digits
+and `_`, not starting with a digit or `_`, without `__`, and not ending in
+`State` (the generator names each atomic's state struct `<model>State`).
+In addition:
 
 - No C++ keyword, no well-known C/C++ macro name (`EOF`, `NULL`,
   `INFINITY`; component ids from the coupled model, like `P01`, are fine),
   and none of the reserved names
-  - `e`, `inf`, `state`, `id`, `initial_state`, `std`, `cadmium`,
+  - `e`, `inf`, `nan`, `state`, `id`, `initial_state`, `std`, `cadmium`,
     `Port`, `Atomic`, `Coupled`, `Component`, `output`,
     `internalTransition`, `externalTransition`, `confluentTransition`,
     `timeAdvance`, `logState`, `addComponent`, `addCoupling`,
@@ -133,7 +130,7 @@ ending in `State` (the generator names each atomic's state struct
 - The model name, input ports, output ports and state variables are all
   distinct (no port in both `x` and `y`, no state variable named like a
   port).
-- A state variable name is not the ending of another state variable,
-  of an output port, or of `if`, `else`, `inf` (so never `f`, `nf`,
-  `se`, `lse`).
+- A state variable name is not the ending of another name the model uses
+  (a state variable, port, parameter, field or function), nor of `if`,
+  `else`, `inf` (so never `f`, `nf`, `se`, `lse`).
 - An output port name does not start with `if` or `else`.

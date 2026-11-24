@@ -49,8 +49,9 @@ REPLY_LIMIT = 1500     # chars of a json-less reply sent back
 
 PROMPT = """\
 You are given a coupled DEVS model in two forms: its raw DEVSMap files
-(the coupled model, every atomic model it uses, and its initial states)
-and a flattened summary (hierarchy removed: leaf components, their
+(the coupled model, every atomic model it uses, the set definition
+files they include, its initial states and any parameter file) and a
+flattened summary (hierarchy removed: leaf components, their
 initial states, leaf-to-leaf couplings, the atomic models' behavior).
 
 Your task: give the equivalent atomic model -- fuse the coupled model
@@ -174,11 +175,16 @@ atomic (plain text here; your answer uses ```json blocks):
         "otherwise": {{"A": "\"Ball\"", "B": "\"NoBall\"",
                        "sigma": "0.1"}}}},
       "delta_ext": {{"otherwise": {{}}}},
-      "delta_con": {{"otherwise": {{}}}},
+      "delta_con": {{
+        "A == \"Ball\"": {{"A": "\"NoBall\"", "B": "\"Ball\"",
+                           "sigma": "0.1"}},
+        "otherwise": {{"A": "\"Ball\"", "B": "\"NoBall\"",
+                       "sigma": "0.1"}}}},
       "lambda": {{
         "A == \"Ball\"": {{"send": "\"A:ball\""}},
         "otherwise": {{"send": "\"B:ball\""}}}},
-      "ta": {{"otherwise": "sigma"}}}}}}
+      "ta": {{"otherwise": "sigma"}}}},
+     "parameters": {{}}, "include_sets": []}}
 
 Init: {{"init_states": {{"fused_pingpong": {{"A": "\"Ball\"",
 "B": "\"NoBall\"", "sigma": "0.1"}}}}}}.
@@ -361,6 +367,21 @@ def model_files(model):
     return list(dict.fromkeys(paths))
 
 
+def definition_files(model):
+    """Paths of the files in the include_sets of the model and every
+    component model, each relative to the model file listing it."""
+    paths = []
+    for model_path in model_files(model):
+        folder = os.path.dirname(model_path)
+        for name in devsmap.read_json(model_path).get("include_sets", []):
+            path = os.path.abspath(os.path.join(folder, name))
+            if not os.path.exists(path):
+                raise ValueError(f"{os.path.basename(model_path)}: "
+                                 f"include_sets file {name} does not exist")
+            paths.append(path)
+    return list(dict.fromkeys(paths))
+
+
 def raw_file(path):
     """A file's contents as a ```json block headed by its filename."""
     with open(path, encoding="utf-8") as f:
@@ -371,7 +392,11 @@ def build_prompt(model, reference):
     """The first prompt; `reference` is None for an open model."""
     with open(DEVSMAP_SPEC, encoding="utf-8") as f:
         spec = f.read()
-    paths = model_files(model) + [model["init_path"]]
+    paths = model_files(model) + definition_files(model) + [model["init_path"]]
+    param_path = os.path.join(os.path.dirname(model["path"]),
+                              f"{model['name']}_param.json")
+    if os.path.exists(param_path):
+        paths.append(param_path)
     if reference is None:
         rules = NO_TRACE_RULES
     else:
@@ -577,15 +602,20 @@ def parse_reply(reply):
     return proposal, docs, None
 
 
-def write_proposal(folder, atomic, init):
+def write_proposal(folder, atomic, init, definitions):
     """Write a proposal to <name>_atomic.json and <name>_init_state.json in
-    folder; return the atomic's path. ValueError if it has no usable name."""
+    folder, with the `definitions` files its include_sets lists; return the
+    atomic's path. ValueError if it has no usable name."""
     name = devsmap.model_name(atomic, "the atomic document")
     if os.path.basename(name) != name:
         raise ValueError(f"model name {name!r} is not a plain name")
     devsmap.write_json(os.path.join(folder, f"{name}_init_state.json"), init)
     path = os.path.join(folder, f"{name}_atomic.json")
     devsmap.write_json(path, atomic)
+    listed = atomic.get("include_sets")
+    for definition in definitions:
+        if isinstance(listed, list) and os.path.basename(definition) in listed:
+            shutil.copy(definition, folder)
     return path
 
 
@@ -638,7 +668,7 @@ def verify_open(path, coupled):
         fused = devsmap.load_model(path)
         if not isinstance(fused["body"], dict) or _ports(fused) != ports:
             return False, (f"x and y must be exactly the coupled model's "
-                           f"(port names and C++ types): {json.dumps(ports)}")
+                           f"(port names and domains): {json.dumps(ports)}")
         header = cadmium_api.check(path)
     except (ValueError, cadmium_api.CadmiumError) as exc:
         return False, str(exc)
@@ -675,6 +705,7 @@ def fuse(coupled_path, out_dir=OUT_DIR):
     the LLM is asked anything.
     """
     model = devsmap.load_model(coupled_path)
+    definitions = definition_files(model)
     load_env_file()
     max_iters = env_int("FUSE_MAX_ITERS", 3)
     settings = llm_settings()
@@ -707,7 +738,8 @@ def fuse(coupled_path, out_dir=OUT_DIR):
             proposal, docs, reason = parse_reply(reply)
             if docs is not None:
                 try:
-                    path = write_proposal(tempfile.mkdtemp(dir=tmp), *docs)
+                    path = write_proposal(tempfile.mkdtemp(dir=tmp), *docs,
+                                          definitions)
                 except (ValueError, OSError) as exc:
                     reason = f"unusable proposal: {exc}"
                 else:
