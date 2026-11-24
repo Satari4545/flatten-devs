@@ -4,8 +4,8 @@
     Atomic(encoding, name, body)   an atomic model's functions on symbolic
                                    states
     show(value)                    a concrete value (from a model) as text
-    FLOAT, fin, f_arith, f_eq, f_lt, f_le, f_min
-                                   floating_point values and operations
+    duration, time_left, earliest, at, before, by
+                                   times, as floating_point values
     all_of, any_of, not_, ite      Boolean and if-then-else builders
     within(where, run, *args)      run, naming `where` in its ValueError
 
@@ -28,6 +28,7 @@ floating_point; so is the text of a number.
 """
 
 import fractions
+import functools
 import json
 import operator
 
@@ -64,7 +65,7 @@ _CONSTANTS = {"true": TRUE, "false": FALSE, "inf": INF,
 RESERVED = {*_CONSTANTS, "e"}  # names no variable, port or parameter takes
 
 
-def fin(x):
+def _fin(x):
     """A finite floating_point holding the Real (or number) x; 0 is +0.0."""
     return FLOAT.fin(x)
 
@@ -164,10 +165,10 @@ def _zero(a):
 
 def _make(x, negative):
     """The finite floating_point x; when x is 0, -0.0 if `negative`."""
-    return ite(all_of(_real_op("==", x, _ZERO), negative), NZERO, fin(x))
+    return ite(all_of(_real_op("==", x, _ZERO), negative), NZERO, _fin(x))
 
 
-def f_neg(a):
+def _f_neg(a):
     return ite(_finite(a), _make(_real_op("-", _ZERO, _real(a)),
                                  not_(_signbit(a))),
                ite(_is("pinf", a), NINF,
@@ -195,17 +196,17 @@ def _infinite(op, a, b):
         return ite(_finite(a), b,
                    ite(_finite(b), a, ite(a == b, a, INVALID)))
     if op == "-":
-        return ite(_finite(a), f_neg(b),
+        return ite(_finite(a), _f_neg(b),
                    ite(_finite(b), a, ite(a == b, INVALID, a)))
     sign = _xor(_signbit(a), _signbit(b))
     if op == "*":
         return ite(any_of(_zero(a), _zero(b)), INVALID,
                    ite(sign, NINF, INF))
-    return ite(_finite(a), ite(sign, NZERO, fin(0)),
+    return ite(_finite(a), ite(sign, NZERO, _fin(0)),
                ite(_finite(b), ite(sign, NINF, INF), INVALID))
 
 
-def f_arith(op, a, b):
+def _f_arith(op, a, b):
     """a op b for op in + - * / on FLOAT values."""
     both = all_of(_finite(a), _finite(b))
     if z3.is_true(both):
@@ -215,7 +216,7 @@ def f_arith(op, a, b):
     return ite(both, _exact(op, a, b), special)
 
 
-def f_lt(a, b):
+def _f_lt(a, b):
     both = all_of(_finite(a), _finite(b))
     if z3.is_true(both):
         return _real_op("<", _real(a), _real(b))
@@ -225,7 +226,7 @@ def f_lt(a, b):
                              all_of(not_(_is("pinf", a)), _is("pinf", b)))))
 
 
-def f_eq(a, b):
+def _f_eq(a, b):
     """IEEE a == b: false if either is NaN, -0.0 == 0.0."""
     both = all_of(_finite(a), _finite(b))
     if z3.is_true(both):
@@ -234,24 +235,54 @@ def f_eq(a, b):
                   ite(both, _real_op("==", _real(a), _real(b)), a == b))
 
 
-def f_le(a, b):
-    return any_of(f_lt(a, b), f_eq(a, b))
+def _f_le(a, b):
+    return any_of(_f_lt(a, b), _f_eq(a, b))
 
 
-def f_min(a, b):
-    return ite(f_le(a, b), a, b)
+def _f_min(a, b):
+    return ite(_f_le(a, b), a, b)
+
+
+# Time, for the prover: elapsed and event times are Reals, a time advance
+# (and a time left until it) a floating_point.
+def duration(t):
+    """A Real time as a floating_point."""
+    return _fin(t)
+
+
+def time_left(ta, e):
+    """ta - e: the time until the next internal event, e after the last."""
+    return _f_arith("-", ta, _fin(e))
+
+
+def earliest(times):
+    """The least of floating_point times."""
+    return functools.reduce(_f_min, times)
+
+
+def at(t, time):
+    """Whether the Real t is the floating_point time."""
+    return _f_eq(_fin(t), time)
+
+
+def before(t, time):
+    return _f_lt(_fin(t), time)
+
+
+def by(t, time):
+    return _f_le(_fin(t), time)
 
 
 def _float_op(op, a, b):
     if op in ("<", ">"):
-        return f_lt(a, b) if op == "<" else f_lt(b, a)
+        return _f_lt(a, b) if op == "<" else _f_lt(b, a)
     if op in ("<=", ">="):
-        return f_le(a, b) if op == "<=" else f_le(b, a)
+        return _f_le(a, b) if op == "<=" else _f_le(b, a)
     if op in ("==", "!="):
-        return f_eq(a, b) if op == "==" else not_(f_eq(a, b))
+        return _f_eq(a, b) if op == "==" else not_(_f_eq(a, b))
     if op == "%":
         raise ValueError("% of floating_point values")
-    return f_arith(op, a, b)
+    return _f_arith(op, a, b)
 
 
 def _int_div(a, b):
@@ -279,7 +310,7 @@ def _numeric(sort):
 
 def _number(text):
     if any(c in text for c in ".eE"):
-        return fin(z3.RealVal(str(fractions.Fraction(text))))
+        return _fin(z3.RealVal(str(fractions.Fraction(text))))
     return z3.IntVal(int(text))
 
 
@@ -336,6 +367,19 @@ class Encoding:
         self.assumed = set()  # functions called whose result is assumed
         self.constant_calls = set()  # functions called with no arguments
 
+    def define_parameters(self, domains, values):
+        """Parameters {name: domain}, each with the value of its expression
+        in `values`, else any value (a symbol)."""
+        reserved = sorted(RESERVED & set(domains))
+        if reserved:
+            raise ValueError(f"{', '.join(reserved)} is a reserved name, not "
+                             f"a parameter")
+        self.params = {
+            name: within(f"parameter {name}", self.value, values[name],
+                         self.sort(domain), {}) if name in values
+            else z3.Const(name, self.sort(domain))
+            for name, domain in domains.items()}
+
     def declare_functions(self, domains):
         """Give the functions the models call result domains {name:
         domain}; an undeclared one returns a floating_point."""
@@ -391,9 +435,9 @@ class Encoding:
         if have == BOOL and _numeric(sort):
             return self.convert(z3.If(v, z3.IntVal(1), z3.IntVal(0)), sort)
         if sort == BOOL and _numeric(have):
-            return not_(f_eq(v, fin(0))) if have == FLOAT else v != 0
+            return not_(_f_eq(v, _fin(0))) if have == FLOAT else v != 0
         if sort == FLOAT and have != FLOAT and _numeric(have):
-            return fin(z3.ToReal(v if have == INT else z3.BV2Int(v)))
+            return _fin(z3.ToReal(v if have == INT else z3.BV2Int(v)))
         if sort == INT and have == FLOAT:
             x = _real(v)
             truncated = z3.If(x >= 0, z3.ToInt(x), -z3.ToInt(-x))
@@ -532,7 +576,7 @@ class Encoding:
     def _negate(self, v):
         sort = _plain(v).sort()
         if sort == FLOAT:
-            return f_neg(v)
+            return _f_neg(v)
         return -v if _unsigned(sort) else -self.convert(v, INT)
 
     def _text(self, part, scope):
@@ -694,7 +738,7 @@ class Atomic:
         delta_ext with e = 0."""
         if kind == "con" and not self.own_confluent:
             return [(f"{label} (delta_int, then delta_ext)", guard,
-                     self.delta("ext", after, fin(0), bags))
+                     self.delta("ext", after, _fin(0), bags))
                     for label, guard, after in self.transitions("int", state)]
         where = f"{self.name}.delta_{kind}"
         scope = self.scope(state, *((e, bags) if kind != "int" else ()))

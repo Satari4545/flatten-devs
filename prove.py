@@ -40,9 +40,9 @@ import z3
 
 import devsmap
 import devsmap_flatten
-from devsmap_z3 import (FALSE, STRING, Atomic, Encoding, all_of, any_of,
-                        f_arith, f_eq, f_le, f_lt, f_min, fin, ite, show,
-                        within)
+from devsmap_z3 import (FALSE, STRING, Atomic, Encoding, all_of, any_of, at,
+                        before, by, duration, earliest, ite, show,
+                        time_left, within)
 
 QUERY_TIMEOUT = 600  # seconds per Z3 query
 EVENTS = {"int": "internal", "ext": "external", "con": "confluent"}
@@ -131,20 +131,16 @@ class Resultant:
 
     def remaining(self, s):
         """{component: ta - e}, the time until its next internal event."""
-        return {cid: f_arith("-", a.ta(s.vars[cid]), fin(s.e[cid]))
+        return {cid: time_left(a.ta(s.vars[cid]), s.e[cid])
                 for cid, a in self.parts.items()}
 
     def ta(self, s):
-        times = list(self.remaining(s).values())
-        result = times[0]
-        for t in times[1:]:
-            result = f_min(result, t)
-        return result
+        return earliest(self.remaining(s).values())
 
     def well_formed(self, s):
         """0 <= e <= ta in every component (ta not NaN)."""
         return all_of(*[all_of(s.e[cid] >= 0,
-                               f_le(fin(s.e[cid]), a.ta(s.vars[cid])))
+                               by(s.e[cid], a.ta(s.vars[cid])))
                         for cid, a in self.parts.items()])
 
     def event(self, s, kind, t, inputs):
@@ -158,11 +154,10 @@ class Resultant:
         own e + t; the others' e grows by t.
         """
         remaining = self.remaining(s)
-        now = fin(t)
-        imminent = {cid: FALSE if kind == "ext" else f_eq(r, now)
+        imminent = {cid: FALSE if kind == "ext" else at(t, r)
                     for cid, r in remaining.items()}
-        timing = ([f_lt(now, r) for r in remaining.values()] if kind == "ext"
-                  else [f_le(now, r) for r in remaining.values()]
+        timing = ([before(t, r) for r in remaining.values()] if kind == "ext"
+                  else [by(t, r) for r in remaining.values()]
                   + [any_of(*imminent.values())])
         arriving = [any_of(*[z3.Length(x) > 0 for x in inputs.values()])
                     ] if kind != "int" else []
@@ -196,13 +191,13 @@ class Resultant:
     def _transition(a, old, e, imminent, receiving, bags):
         new = dict(old)
         if not z3.is_false(receiving):
-            ext = a.delta("ext", old, fin(e), bags)
+            ext = a.delta("ext", old, duration(e), bags)
             new = {v: ite(receiving, ext[v], new[v]) for v in old}
         if not z3.is_false(imminent):
             internal = a.delta("int", old)
             new = {v: ite(imminent, internal[v], new[v]) for v in old}
             if not z3.is_false(receiving):
-                con = a.delta("con", old, fin(e), bags)
+                con = a.delta("con", old, duration(e), bags)
                 both = all_of(imminent, receiving)
                 new = {v: ite(both, con[v], new[v]) for v in old}
         return new, ite(any_of(imminent, receiving), z3.RealVal(0), e)
@@ -261,7 +256,7 @@ class Mapping:
             node = names
             for part in outer:
                 node = node.setdefault(part, {})
-            node[last] = {**values, "e": fin(s.e[cid])}
+            node[last] = {**values, "e": duration(s.e[cid])}
         names["ta"] = self.resultant.ta(s)
         return names
 
@@ -379,7 +374,7 @@ class _Proof:
             imminent = [cid for cid, x in event.imminent.items()
                         if z3.is_true(m.eval(x, True))]
             lines.append(f"  event: {EVENTS[event.kind]} at t = "
-                         f"{value(fin(self.t))}"
+                         f"{value(duration(self.t))}"
                          + (f", inputs {', '.join(given)}" if given else "")
                          + f"; imminent: {', '.join(imminent) or 'none'}")
         return lines
@@ -388,7 +383,7 @@ class _Proof:
     def state_lines(m, s):
         return [f"    {cid}: " + ", ".join(
                     f"{v} = {show(m.eval(x, True))}" for v, x in values.items())
-                + f", e = {show(m.eval(fin(s.e[cid]), True))}"
+                + f", e = {show(m.eval(duration(s.e[cid]), True))}"
                 for cid, values in s.vars.items()]
 
     @staticmethod
@@ -481,7 +476,7 @@ class _Proof:
             want = self.h(event.after)
             premise = [self.invariant(conditions, self.s), event.holds]
             for label, guard, got in self.f.transitions(
-                    event.kind, self.hs, fin(self.t), event.inputs):
+                    event.kind, self.hs, duration(self.t), event.inputs):
                 self.check(
                     f"delta_{event.kind} on {EVENTS[event.kind]} events, F "
                     f"branch {label!r}", premise + [guard],
@@ -496,8 +491,8 @@ class _Proof:
 
 
 def _parameters(enc, coupled, fused):
-    """{name: value}: one value per parameter, from the coupled model's
-    parameter file, else a symbol (any value)."""
+    """Define the parameters of every model: one value per name, from the
+    coupled model's parameter file, else any value."""
     domains = {}
     for model in [*devsmap.models(coupled), fused]:
         for name, domain in model["parameters"].items():
@@ -511,8 +506,7 @@ def _parameters(enc, coupled, fused):
                 raise ValueError(f"parameter {name} has the values "
                                  f"{values[name]} and {text}; one value per "
                                  f"name is supported")
-    return {name: enc.value(values[name], enc.sort(d), {}) if name in values
-            else z3.Const(name, enc.sort(d)) for name, d in domains.items()}
+    enc.define_parameters(domains, values)
 
 
 def prove(coupled_path, fused_path, prune=False):
@@ -527,7 +521,7 @@ def prove(coupled_path, fused_path, prune=False):
                          "model")
     enc = Encoding(devsmap.definition_files(coupled)
                    + devsmap.definition_files(fused_model))
-    enc.params = _parameters(enc, coupled, fused_model)
+    _parameters(enc, coupled, fused_model)
     resultant = Resultant(enc, coupled)
     fused = Atomic(enc, fused_model["name"], fused_model["body"])
     if resultant.x or resultant.y:
