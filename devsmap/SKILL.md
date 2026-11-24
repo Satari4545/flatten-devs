@@ -104,8 +104,10 @@ no side effects. An expression may use:
   last). A branch reads `p.bag(i)` only when its condition makes sure the
   message exists (e.g. `p.bagSize() != 0` as an `&&` term);
 - the operators `== != <= >= < > && || ( ) + - * / %`, at most one
-  comparison per operand (no `a < b < c`) and two `-` always separated by a
-  space (`a - -b`); `"text" + number` builds a string;
+  comparison per operand (no `a < b < c`), never a comparison or boolean
+  as a number (no `(a == b) * 3`, no `x + (a < b)`), and two `-` always
+  separated by a space (`a - -b`); `"text" + number` builds a message's
+  text, never a phase;
 - values: numbers (a floating-point value has a decimal point, `2.0`; an
   integer has none, `2`), `true`, `false`, `inf`, `-nan`, string literals
   (`"Wait"`), arrays `[a, b, c]`, and struct values `set_name(v1, ..., vn)`
@@ -118,7 +120,9 @@ operators, and no C++.
 
 A phase (an enumeration) is a string literal on a state variable of the
 input models' string domain: the condition `phase == "Wait"`, the
-assignment `"phase": "\"Send\""` (JSON escapes the quotes).
+assignment `"phase": "\"Send\""` (JSON escapes the quotes). A phase is
+only ever assigned one string literal: when the next phase depends on a
+condition, write one branch per next phase instead of computing it.
 
 ## Names
 

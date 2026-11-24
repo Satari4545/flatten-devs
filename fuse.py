@@ -123,16 +123,21 @@ Recode the reachable set as an atomic model that keeps component identity:
 
 - **One state variable per component**, named by its id (e.g. `P01`,
   `P02`), recording that component's state directly. A component with
-  several aspects gets one variable per aspect (`P01_phase`,
-  `P01_count`, ...). Never fold several components into one variable (no
-  holder, pointer, token, bare timer or counter): that erases which
-  component is which and is not a quotient of the paper's resultant.
+  several aspects gets one variable per aspect, named `<id>_<its model's
+  variable name>` (`P01_phase`, `P01_count` for the model's `phase` and
+  `count`); one whose only aspect is its phase keeps the bare id. Never
+  fold several components into one variable (no holder, pointer, token,
+  bare timer or counter): that erases which component is which and is
+  not a quotient of the paper's resultant.
 - Minimality happens *within* each component's variables: drop a
   variable only when it is provably redundant -- a function of variables
   you keep (e.g. sigma_Pi fixed by phase_Pi), or a clock no transition
   reads and that can never make its component imminent. Merge values of
   one component's variable only when they are behaviorally
   indistinguishable, and justify each merge.
+- **Keep each model's own names**: a phase value is written exactly as
+  its model writes it, never numbered, abbreviated or renamed (merged
+  values keep the name of one of them).
 - One shared `sigma` for the fused model's time advance is fine; it is
   the resultant's clock, not a component's state.
 - `lambda` emits `"<component_id>:<value>"` (e.g. `"A:ball"`), never a
@@ -161,33 +166,33 @@ sigma = 0.1, Wait <=> sigma = inf; neither delta_ext reads `e` and no
 passive component can go imminent, so individual clocks are dropped.
 Two reachable states.
 
-Phase 3: `A` is `"Ball"` exactly when component A is Send (otherwise
-`"NoBall"`), likewise `B`; one shared `sigma` drives ta. The fused
-atomic (plain text here; your answer uses ```json blocks):
+Phase 3: `A` holds component A's phase, `"Send"` or `"Wait"`, likewise
+`B`; one shared `sigma` drives ta. The fused atomic (plain text here;
+your answer uses ```json blocks):
 
     {{"fused_pingpong": {{
       "x": {{}},
       "y": {{"send": "std::string"}},
       "s": {{"A": "std::string", "B": "std::string", "sigma": "double"}},
       "delta_int": {{
-        "A == \"Ball\"": {{"A": "\"NoBall\"", "B": "\"Ball\"",
+        "A == \\"Send\\"": {{"A": "\\"Wait\\"", "B": "\\"Send\\"",
                            "sigma": "0.1"}},
-        "otherwise": {{"A": "\"Ball\"", "B": "\"NoBall\"",
+        "otherwise": {{"A": "\\"Send\\"", "B": "\\"Wait\\"",
                        "sigma": "0.1"}}}},
       "delta_ext": {{"otherwise": {{}}}},
       "delta_con": {{
-        "A == \"Ball\"": {{"A": "\"NoBall\"", "B": "\"Ball\"",
+        "A == \\"Send\\"": {{"A": "\\"Wait\\"", "B": "\\"Send\\"",
                            "sigma": "0.1"}},
-        "otherwise": {{"A": "\"Ball\"", "B": "\"NoBall\"",
+        "otherwise": {{"A": "\\"Send\\"", "B": "\\"Wait\\"",
                        "sigma": "0.1"}}}},
       "lambda": {{
-        "A == \"Ball\"": {{"send": "\"A:ball\""}},
-        "otherwise": {{"send": "\"B:ball\""}}}},
+        "A == \\"Send\\"": {{"send": "\\"A:ball\\""}},
+        "otherwise": {{"send": "\\"B:ball\\""}}}},
       "ta": {{"otherwise": "sigma"}}}},
      "parameters": {{}}, "include_sets": []}}
 
-Init: {{"init_states": {{"fused_pingpong": {{"A": "\"Ball\"",
-"B": "\"NoBall\"", "sigma": "0.1"}}}}}}.
+Init: {{"init_states": {{"fused_pingpong": {{"A": "\\"Send\\"",
+"B": "\\"Wait\\"", "sigma": "0.1"}}}}}}.
 
 The DEVSMap format you must follow is described below:
 ---
