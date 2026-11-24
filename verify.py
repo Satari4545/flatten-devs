@@ -322,6 +322,12 @@ def check_encoding():
                  halve[0], devsmap_z3.FLOAT, halve[1])
     enc.declare_functions({"abs": "integer"})
     enc.value(halve[0], devsmap_z3.FLOAT, halve[1])  # now an int division
+    enc.choose({"i > 0": {"i > 5": "2", "otherwise": "1"}, "otherwise": "0"},
+               z3.IntSort(), halve[1])
+    expect_error(ValueError, "needs \"otherwise\" last, nested ones too",
+                 "a nested value map without otherwise", enc.choose,
+                 {"i > 0": {"i > 5": "2"}, "otherwise": "0"}, z3.IntSort(),
+                 halve[1])
     expect_error(ValueError, "e is a reserved name", "a state variable e",
                  devsmap_z3.Atomic, enc, "m",
                  timer_body(s={"e": "double", "sigma": "double"}))

@@ -570,20 +570,23 @@ class Encoding:
             return _float_op(op, a, b)
         return (_UNSIGNED_OPS if words else _INT_OPS)[op](a, b)
 
-    def branches(self, cmap, scope):
+    def branches(self, cmap, scope, values=False):
         """[(label, guard, body)]: each leaf of a (possibly nested)
         condition map, its guard true exactly when the generator's
-        if/else-if chain takes it."""
+        if/else-if chain takes it; where no key holds, the body is {}. In a
+        map of `values` (expressions), every dict is a nested map."""
         found = []
+
+        def nested(body):
+            return isinstance(body, dict) and (values or any(
+                isinstance(v, dict) for v in body.values()))
 
         def walk(m, guard, labels):
             rest = guard
             for key, body in m.items():
-                cond = TRUE if key == "otherwise" else \
-                    self.condition(key, scope)
+                cond = TRUE if key == "otherwise" else                     self.condition(key, scope)
                 taken, rest = all_of(rest, cond), all_of(rest, not_(cond))
-                if isinstance(body, dict) and any(isinstance(v, dict)
-                                                  for v in body.values()):
+                if nested(body):
                     walk(body, taken, labels + [key])
                 else:
                     found.append((" / ".join(labels + [key]), taken, body))
@@ -595,15 +598,16 @@ class Encoding:
         return found
 
     def choose(self, cmap, sort, scope):
-        """The value of an expression, or of a condition map whose branches
-        are expressions (it must end with "otherwise")."""
+        """The value of an expression, or of a condition map of
+        expressions, nested maps too, each ending with "otherwise"."""
         if isinstance(cmap, str):
             return self.value(cmap, sort, scope)
-        if list(cmap)[-1:] != ["otherwise"]:
-            raise ValueError("a condition map of values needs \"otherwise\" "
-                             "last")
         result = None
-        for _, guard, body in reversed(self.branches(cmap, scope)):
+        for label, guard, body in reversed(self.branches(cmap, scope, True)):
+            if not isinstance(body, str):
+                raise ValueError(f"{label}: a condition map of values needs "
+                                 f"\"otherwise\" last, nested ones too, and "
+                                 f"expressions as values")
             v = self.value(body, sort, scope)
             result = v if result is None else ite(guard, v, result)
         return result
