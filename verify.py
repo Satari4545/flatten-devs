@@ -21,7 +21,6 @@ import cadmium_api
 import devsmap
 import devsmap_flatten
 import fuse
-import prove
 
 REPO = os.path.dirname(os.path.abspath(__file__))
 MODELS = os.path.join(REPO, "devsmap")
@@ -342,6 +341,7 @@ def check_encoding():
 
 def proving(coupled, fused, prune=False):
     """(prove.prove's Report, what it printed)."""
+    import prove  # the prover's checks need z3-solver, --selftest does not
     log = io.StringIO()
     with contextlib.redirect_stdout(log):
         report = prove.prove(coupled, fused, prune)
@@ -397,6 +397,7 @@ def check_prove_pingpong(folder):
 
 def check_prove_unknown():
     """Z3 giving up is never a proof, the initial state included."""
+    import prove
     with mock.patch.object(prove, "_query",
                            lambda premises, goal: ("unknown", "stubbed")):
         report, text = proving(COUPLED, HAND_FUSED)

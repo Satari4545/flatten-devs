@@ -16,7 +16,6 @@ import sys
 
 import cadmium_api
 import fuse
-import prove
 import verify
 
 
@@ -77,6 +76,7 @@ def main(argv=None):
         elif args.selftest:
             verify.selftest()
         elif args.prove:
+            import prove  # needs z3-solver, which fusing does not
             return 0 if prove.prove(args.model, args.prove,
                                     args.prune).proven else 1
         else:
