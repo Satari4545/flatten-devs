@@ -302,16 +302,23 @@ def check_fuse_loop(folder):
           "a model without outputs refused")
 
 
-def check_encoding():
+def check_encoding(folder):
     """The prover's encoding keeps C++'s corner cases: unsigned integers
-    wrap around, zeros are signed, a leading zero is octal."""
+    wrap around, zeros are signed, a leading zero is octal, a set of one
+    field converts like that field."""
     import z3
     import devsmap_z3
 
-    enc = devsmap_z3.Encoding([])
+    definitions = os.path.join(folder, "level_definitions.json")
+    devsmap.write_json(definitions, {"level": {"value": {
+        "domain": "unsigned_integer", "min": "0", "max": "255",
+        "dimension": ["1"]}}})
+    enc = devsmap_z3.Encoding([definitions])
     scope = {"u": z3.Const("u", enc.sort("unsigned_integer"))}
+    scope["v"] = enc.value("u", enc.sort("level"), scope)
     for text in ["u != 0 || u - 1 == 4294967295", "u >= 0", "u <= -1",
-                 "1.0 / -0.0 == -inf", "-0.0 == 0.0", "0.0 * -1.0 == 0.0"]:
+                 "1.0 / -0.0 == -inf", "-0.0 == 0.0", "0.0 * -1.0 == 0.0",
+                 "v == u", "v.value + 1 == u + 1", "v == level(u)"]:
         solver = z3.Solver()
         solver.add(z3.Not(enc.condition(text, scope)))
         check(solver.check() == z3.unsat, f"encoding: {text} not always true")
@@ -335,8 +342,9 @@ def check_encoding():
     expect_error(ValueError, "the only form", "a ta expression",
                  devsmap_z3.Atomic, enc, "m",
                  timer_body(ta={"otherwise": "sigma * 2.0"}))
-    print("encoding OK: unsigned wraparound, signed zeros; no octal "
-          "literal, reserved name or ta other than a state variable")
+    print("encoding OK: unsigned wraparound, signed zeros, a set of one "
+          "field as its field; no octal literal, reserved name or ta other "
+          "than a state variable")
 
 
 def proving(coupled, fused, prune=False):
@@ -509,8 +517,7 @@ def run_checks():
             run(tmp)
     check_fuse_verifier()
     for run in (check_reference_window, check_fuse_loop,
-                check_prove_pingpong, check_prove_open):
+                check_prove_pingpong, check_prove_open, check_encoding):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             run(tmp)
-    check_encoding()
     check_prove_unknown()

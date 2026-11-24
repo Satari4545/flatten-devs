@@ -145,8 +145,10 @@ x` as the text of each operand. Domains:
   arithmetic passes a NaN operand on, and an invalid operation (inf - inf,
   0 * inf, 0 / 0) gives -nan, as on x86.
 - string, boolean; a struct set of the definitions files is a datatype
-  (`set(...)`, `.field`); arrays and input bags are sequences
-  (`bagSize()`, `bag(i)` with a Python-style index).
+  (`set(...)`, `.field`). A set of one field also converts to and from
+  that field's value, as a C++ alias of the field's type would. Arrays
+  and input bags are sequences (`bagSize()`, `bag(i)` with a
+  Python-style index).
 - A function the models call is uninterpreted; it returns its domain
   under `functions`, else a floating_point, and then a `/` or `%` that C++
   might do on integers through it is refused. The text of a number is

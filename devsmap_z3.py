@@ -403,6 +403,16 @@ class Encoding:
         name = sort.name()
         return list(self._sets[name]) if name in self._structs else None
 
+    def _only_field(self, sort):
+        """The accessor of a struct sort's field if it has just one."""
+        fields = self.fields(sort)
+        return sort.accessor(0, 0) if fields and len(fields) == 1 else None
+
+    def _unwrap(self, v):
+        """A value of a set of one field as that field's value."""
+        field = self._only_field(_plain(v).sort())
+        return v if field is None else field(v)
+
     def value(self, expr, sort, scope):
         """The value of an expression (text or syntax tree) as `sort`."""
         node = parse(expr) if isinstance(expr, str) else expr
@@ -414,10 +424,16 @@ class Encoding:
         return self.value(expr, BOOL, scope)
 
     def convert(self, v, sort):
-        """C++'s implicit conversion of a value to `sort`."""
+        """C++'s implicit conversion of a value to `sort`. A set of one
+        field converts like that field, as a C++ alias of its type would."""
         have = _plain(v).sort()
         if have == sort:
             return v
+        field = self._only_field(sort)
+        if field is not None:
+            return sort.constructor(0)(self.convert(v, field.range()))
+        if self._only_field(have) is not None:
+            return self.convert(self._unwrap(v), sort)
         if have == BOOL and _numeric(sort):
             return self.convert(z3.If(v, z3.IntVal(1), z3.IntVal(0)), sort)
         if sort == BOOL and _numeric(have):
@@ -579,7 +595,7 @@ class Encoding:
         raise ValueError(f"the text of a {sort_name(sort)}")
 
     def _binary(self, op, a, b):
-        a, b = _plain(a), _plain(b)
+        a, b = self._unwrap(a), self._unwrap(b)
         if op in ("&&", "||"):
             a, b = self.convert(a, BOOL), self.convert(b, BOOL)
             return all_of(a, b) if op == "&&" else any_of(a, b)
