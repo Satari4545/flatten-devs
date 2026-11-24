@@ -58,6 +58,8 @@ _BASIC = {
     "string": STRING, "std::string": STRING,
 }
 UNSIGNED = {"unsigned_integer", "unsigned int", "unsigned", "size_t"}
+_CONSTANTS = {"true": TRUE, "false": FALSE, "inf": INF,
+              "nan": FLOAT.nan(FALSE)}
 
 
 def fin(x):
@@ -134,8 +136,9 @@ def f_neg(a):
 
 def _positive(a):
     """For a non-NaN a: a > 0 (or +inf)."""
-    return any_of(_is("pinf", a), all_of(_is("fin", a),
-                                    _real_cmp(">", _val(a), z3.RealVal(0))))
+    return any_of(_is("pinf", a),
+                  all_of(_is("fin", a),
+                         _real_cmp(">", _val(a), z3.RealVal(0))))
 
 
 def _zero(a):
@@ -186,9 +189,9 @@ def f_lt(a, b):
     if z3.is_true(both):
         return _real_cmp("<", _val(a), _val(b))
     return all_of(not_(_is("nan", a)), not_(_is("nan", b)),
-                ite(both, _real_cmp("<", _val(a), _val(b)),
-                    any_of(all_of(_is("ninf", a), not_(_is("ninf", b))),
-                        all_of(not_(_is("pinf", a)), _is("pinf", b)))))
+                  ite(both, _real_cmp("<", _val(a), _val(b)),
+                      any_of(all_of(_is("ninf", a), not_(_is("ninf", b))),
+                             all_of(not_(_is("pinf", a)), _is("pinf", b)))))
 
 
 def f_eq(a, b):
@@ -197,7 +200,7 @@ def f_eq(a, b):
     if z3.is_true(both):
         return _real_cmp("==", _val(a), _val(b))
     return all_of(not_(_is("nan", a)), not_(_is("nan", b)),
-                ite(both, _real_cmp("==", _val(a), _val(b)), a == b))
+                  ite(both, _real_cmp("==", _val(a), _val(b)), a == b))
 
 
 def f_le(a, b):
@@ -295,7 +298,7 @@ class Encoding:
                 raise ValueError(f"unknown domain {domain!r}: not a basic "
                                  f"set and in no definitions file")
             self._structs[domain] = None  # being made: catches recursion
-            fields = [(f"{domain}.{field}", self._field_sort(spec, domain))
+            fields = [(f"{domain}.{field}", self._field_sort(spec))
                       for field, spec in self._sets[domain].items()]
             datatype = z3.Datatype(domain)
             datatype.declare(domain, *fields)
@@ -304,7 +307,7 @@ class Encoding:
             raise ValueError(f"set {domain!r} contains itself")
         return self._structs[domain]
 
-    def _field_sort(self, spec, domain):
+    def _field_sort(self, spec):
         base = self.sort(spec["domain"])
         return base if spec.get("dimension", ["1"]) == ["1"] else \
             z3.SeqSort(base)
@@ -380,10 +383,8 @@ class Encoding:
     def _name(self, name, scope):
         if name in scope:
             return scope[name]
-        constants = {"true": TRUE, "false": FALSE, "inf": INF,
-                     "nan": FLOAT.nan(FALSE)}
-        if name in constants:
-            return constants[name]
+        if name in _CONSTANTS:
+            return _CONSTANTS[name]
         raise ValueError(f"unknown name {name!r}")
 
     def _member(self, v, field):
@@ -421,7 +422,7 @@ class Encoding:
                           for i, a in enumerate(args)])
         values = [_plain(self.eval(a, scope)) for a in args]
         return self.function(name, [v.sort() for v in values],
-                              FLOAT)(*values)
+                             FLOAT)(*values)
 
     def _array(self, items, element, scope):
         if element is None:
