@@ -9,6 +9,8 @@
 
 import json
 
+import devsmap
+
 
 def flatten(model):
     """Dissolve nesting into leaf atomics and leaf-to-leaf couplings.
@@ -88,14 +90,10 @@ def _compact(obj):
     return json.dumps(obj, separators=(",", ":"))
 
 
-def atomic_models(model, out=None):
+def atomic_models(model):
     """{model name: body} of every atomic model in the tree."""
-    out = {} if out is None else out
-    if model["kind"] == "atomic":
-        out[model["name"]] = model["body"]
-    for sub in model.get("models", {}).values():
-        atomic_models(sub, out)
-    return out
+    return {m["name"]: m["body"] for m in devsmap.models(model)
+            if m["kind"] == "atomic"}
 
 
 def flattened_summary(model):

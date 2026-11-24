@@ -98,12 +98,18 @@ def _load(path):
     return model
 
 
+def models(model):
+    """The model and every model below it, each file once."""
+    found = {model["path"]: model}
+    for sub in model.get("models", {}).values():
+        for m in models(sub):
+            found.setdefault(m["path"], m)
+    return list(found.values())
+
+
 def model_files(model):
     """Paths of the model's file and every component model file below it."""
-    paths = [model["path"]]
-    for sub in model.get("models", {}).values():
-        paths += model_files(sub)
-    return list(dict.fromkeys(paths))
+    return [m["path"] for m in models(model)]
 
 
 def definition_files(model):

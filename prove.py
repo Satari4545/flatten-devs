@@ -499,7 +499,7 @@ def _parameters(enc, coupled, fused):
     """{name: value}: one value per parameter, from the coupled model's
     parameter file, else a symbol (any value)."""
     domains = {}
-    for model in [*_tree(coupled), fused]:
+    for model in [*devsmap.models(coupled), fused]:
         for name, domain in model["parameters"].items():
             if enc.sort(domains.setdefault(name, domain)) != enc.sort(domain):
                 raise ValueError(f"parameter {name} has the domains "
@@ -513,12 +513,6 @@ def _parameters(enc, coupled, fused):
                                  f"name is supported")
     return {name: enc.value(values[name], enc.sort(d), {}) if name in values
             else z3.Const(name, enc.sort(d)) for name, d in domains.items()}
-
-
-def _tree(model):
-    """The model and every model below it."""
-    return [model] + [m for sub in model.get("models", {}).values()
-                      for m in _tree(sub)]
 
 
 def prove(coupled_path, fused_path, prune=False):
