@@ -173,6 +173,10 @@ PROVEN assumes:
   the same for the same operands.
 - the parameter values are the constants the C++ is compiled with.
 - the generator and Cadmium run the models as encoded.
+- values of a set of one field stay within the field's min and max where
+  they are narrower than its domain (listed only when a model uses such
+  a set): the encoding uses the full domain, the C++ type may be
+  narrower (`uint8_t`).
 
 ## Cadmium backend
 

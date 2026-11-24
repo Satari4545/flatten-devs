@@ -1,6 +1,7 @@
 """Prove a fused atomic DEVSMap model equivalent to its coupled model.
 
     prove(coupled_path, fused_path, prune=False) -> Report
+    assumptions(encoding)   what a proof made with that encoding assumes
 
 Z3 checks that the map in <fused name>_mapping.json, with its invariant,
 is a homomorphism from the coupled model's resultant (as Cadmium runs it)
@@ -491,6 +492,19 @@ def _parameters(enc, coupled, fused):
     enc.define_parameters(domains, values)
 
 
+def assumptions(enc):
+    """What a proof made with the Encoding enc assumes."""
+    found = list(ASSUMPTIONS)
+    if enc.ranges:
+        found.append("values of a set with a range stay within it: "
+                     + ", ".join(f"{name} {text}" for name, text
+                                 in sorted(enc.ranges.items()))
+                     + "; the encoding uses the field's full domain")
+    return found + [f"{name} returns a floating_point (its domain is not "
+                    f"under \"functions\" in the mapping file)"
+                    for name in sorted(enc.assumed)]
+
+
 def prove(coupled_path, fused_path, prune=False):
     """Prove the fused atomic at fused_path equivalent to the coupled model
     at coupled_path; print each obligation's result and return a Report.
@@ -542,9 +556,6 @@ def prove(coupled_path, fused_path, prune=False):
     else:
         print(f"prove: PROVEN: {fused.name} is equivalent to "
               f"{coupled['name']} ({counts}), assuming:")
-        print("\n".join(f"- {a}" for a in [*ASSUMPTIONS, *[
-            f"{name} returns a floating_point (its domain is not under "
-            f"\"functions\" in the mapping file)"
-            for name in sorted(enc.assumed)]]))
+        print("\n".join(f"- {a}" for a in assumptions(enc)))
     return Report(not proof.failed, proof.failed, proof.vacuous,
                   [c for c, _ in proof.dropped], seconds)

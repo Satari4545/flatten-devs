@@ -16,6 +16,7 @@ encoded and what that assumes.
 import fractions
 import functools
 import json
+import math
 import operator
 
 import z3
@@ -294,6 +295,19 @@ def _numeric(sort):
     return sort in (INT, FLOAT) or _unsigned(sort)
 
 
+def _narrower(sort, low, high):
+    """Whether the bounds low..high (texts) leave out values of a numeric
+    sort; a bound that is not a number counts as leaving some out."""
+    least, greatest = ((0, 2 ** sort.size() - 1) if _unsigned(sort)
+                       else (-math.inf, math.inf))
+    try:
+        low, high = (float(b) if "inf" in b else fractions.Fraction(b)
+                     for b in (low, high))
+    except ValueError:
+        return True
+    return low > least or high < greatest
+
+
 def _number(text):
     if any(c in text for c in ".eE"):
         return _fin(z3.RealVal(str(fractions.Fraction(text))))
@@ -352,6 +366,7 @@ class Encoding:
         self._results = {}  # declared result sorts of the models' functions
         self.assumed = set()  # functions called whose result is assumed
         self.constant_calls = set()  # functions called with no arguments
+        self.ranges = {}  # sets used whose range is not encoded: name -> text
 
     def define_parameters(self, domains, values):
         """Parameters {name: domain}, each with the value of its expression
@@ -389,9 +404,22 @@ class Encoding:
             datatype = z3.Datatype(domain)
             datatype.declare(domain, *fields)
             self._structs[domain] = datatype.create()
+            self._note_range(domain)
         elif self._structs[domain] is None:
             raise ValueError(f"set {domain!r} contains itself")
         return self._structs[domain]
+
+    def _note_range(self, name):
+        """Note a set of one numeric field whose min or max is narrower
+        than the field's domain: its C++ type may be narrower too."""
+        specs = list(self._sets[name].values())
+        if len(specs) != 1:
+            return
+        low, high = (str(specs[0].get(k, default))
+                     for k, default in (("min", "-inf"), ("max", "+inf")))
+        sort = self.sort(specs[0]["domain"])
+        if _numeric(sort) and _narrower(sort, low, high):
+            self.ranges[name] = f"{low}..{high}"
 
     def _field_sort(self, spec):
         base = self.sort(spec["domain"])

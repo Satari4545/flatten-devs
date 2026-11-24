@@ -305,17 +305,25 @@ def check_fuse_loop(folder):
 def check_encoding(folder):
     """The prover's encoding keeps C++'s corner cases: unsigned integers
     wrap around, zeros are signed, a leading zero is octal, a set of one
-    field converts like that field."""
+    field converts like that field, and its range is an assumption."""
     import z3
     import devsmap_z3
+    import prove
 
     definitions = os.path.join(folder, "level_definitions.json")
-    devsmap.write_json(definitions, {"level": {"value": {
-        "domain": "unsigned_integer", "min": "0", "max": "255",
-        "dimension": ["1"]}}})
+    devsmap.write_json(definitions, {
+        name: {"value": {"domain": "unsigned_integer", "min": "0",
+                         "max": high, "dimension": ["1"]}}
+        for name, high in (("level", "255"), ("count", "+inf"))})
     enc = devsmap_z3.Encoding([definitions])
-    scope = {"u": z3.Const("u", enc.sort("unsigned_integer"))}
+    scope = {"u": z3.Const("u", enc.sort("unsigned_integer")),
+             "n": z3.Const("n", enc.sort("count"))}
+    unranged = prove.assumptions(enc)
     scope["v"] = enc.value("u", enc.sort("level"), scope)
+    added = prove.assumptions(enc)[len(unranged):]
+    check(unranged == list(prove.ASSUMPTIONS) and len(added) == 1
+          and "within it: level 0..255;" in added[0],
+          f"encoding: level's range 0..255 assumed as {added}")
     for text in ["u != 0 || u - 1 == 4294967295", "u >= 0", "u <= -1",
                  "1.0 / -0.0 == -inf", "-0.0 == 0.0", "0.0 * -1.0 == 0.0",
                  "v == u", "v.value + 1 == u + 1", "v == level(u)"]:
@@ -343,8 +351,8 @@ def check_encoding(folder):
                  devsmap_z3.Atomic, enc, "m",
                  timer_body(ta={"otherwise": "sigma * 2.0"}))
     print("encoding OK: unsigned wraparound, signed zeros, a set of one "
-          "field as its field; no octal literal, reserved name or ta other "
-          "than a state variable")
+          "field as its field, its range an assumption once used; no octal "
+          "literal, reserved name or ta other than a state variable")
 
 
 def proving(coupled, fused, prune=False):
