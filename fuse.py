@@ -645,7 +645,7 @@ def trace_diff(got, expected, limit=3):
     return "\n".join(lines)
 
 
-def verify(path, reference):
+def matches_reference(path, reference):
     """(ok, reason): does the atomic at `path` match the Reference?"""
     try:
         got = observe(path, reference.horizon)
@@ -749,7 +749,7 @@ def fuse(coupled_path, out_dir=OUT_DIR):
                     reason = f"unusable proposal: {exc}"
                 else:
                     ok, reason = (verify_open(path, model) if reference is None
-                                  else verify(path, reference))
+                                  else matches_reference(path, reference))
                     if ok:
                         accept(path, model, reason, out_dir)
                         return 0

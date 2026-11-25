@@ -39,8 +39,8 @@ the reference comes from running the original model in Cadmium.
 
 ## What an accepted fusion proves
 
-`fuse.reference_run` simulates the original; `fuse.verify` simulates a
-proposal and compares.
+`fuse.reference_run` simulates the original; `fuse.matches_reference`
+simulates a proposal and compares.
 
 - **Window:** the time of the 10th reference output event (or the last
   one if fewer occur by t = 1000). The LLM sees only events up to it.
