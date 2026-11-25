@@ -5,7 +5,8 @@
 its atomic instances by leaf path; `model_files`, `definition_files` and
 `param_path` locate the files a model uses and `read_params` reads its
 parameter values; `model_name` extracts the model key; `read_json` and
-`write_json` read and write a document.
+`write_json` read and write a document; `reading` turns a failed read into
+a ValueError naming the file.
 """
 
 import contextlib
@@ -17,7 +18,8 @@ _IGNORED_KEYS = ("include_sets", "parameters")  # the paper's, not models
 
 
 @contextlib.contextmanager
-def _reading(filename):
+def reading(filename):
+    """Turn a failed read of `filename` into a ValueError naming it."""
     try:
         yield
     except OSError as err:
@@ -62,14 +64,14 @@ def load_model(path):
                          f"itself?)") from None
     model["init_path"] = os.path.join(os.path.dirname(model["path"]),
                                       f"{model['name']}_init_state.json")
-    with _reading(os.path.basename(model["init_path"])):
+    with reading(os.path.basename(model["init_path"])):
         model["init"] = _read_init(model)
     return model
 
 
 def _load(path):
     filename = os.path.basename(path)
-    with _reading(filename):
+    with reading(filename):
         data = read_json(path)
         name = model_name(data, filename)
         kind = next((k for k in _KINDS if filename == f"{name}_{k}.json"),
@@ -159,7 +161,7 @@ def read_params(model):
     path = param_path(model)
     if not os.path.exists(path):
         return {}
-    with _reading(os.path.basename(path)):
+    with reading(os.path.basename(path)):
         return _per_leaf(model, read_json(path)["parameters"], default={})
 
 

@@ -211,18 +211,11 @@ class Mapping:
     def __init__(self, enc, resultant, fused, path):
         self.enc, self.resultant, self.fused = enc, resultant, fused
         self.where = os.path.basename(path)
-        try:
+        with devsmap.reading(self.where):
             doc = devsmap.read_json(path)
             self.exprs = doc["mapping"][fused.name]
             self.invariant = doc.get("invariant", [])
             functions = doc.get("functions", {})
-        except OSError:
-            raise ValueError(f"{self.where}: missing; it maps the coupled "
-                             f"model's states to {fused.name}'s") from None
-        except (ValueError, KeyError, TypeError) as exc:
-            raise ValueError(f"{self.where}: expected {{\"mapping\": "
-                             f"{{\"{fused.name}\": {{...}}}}, \"invariant\": "
-                             f"[...]}} ({exc})") from None
         if set(self.exprs) != set(fused.s):
             raise ValueError(f"{self.where}: maps {sorted(self.exprs)}, "
                              f"{fused.name}'s state variables are "
