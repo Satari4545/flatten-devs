@@ -10,14 +10,14 @@
       "sigma": "double"
     },
     "delta_int": {
-      "A == \"Ball\"": {
-        "A": "\"NoBall\"",
-        "B": "\"Ball\"",
+      "A == \"Send\"": {
+        "A": "\"Wait\"",
+        "B": "\"Send\"",
         "sigma": "0.1"
       },
       "otherwise": {
-        "A": "\"Ball\"",
-        "B": "\"NoBall\"",
+        "A": "\"Send\"",
+        "B": "\"Wait\"",
         "sigma": "0.1"
       }
     },
@@ -25,10 +25,19 @@
       "otherwise": {}
     },
     "delta_con": {
-      "otherwise": {}
+      "A == \"Send\"": {
+        "A": "\"Wait\"",
+        "B": "\"Send\"",
+        "sigma": "0.1"
+      },
+      "otherwise": {
+        "A": "\"Send\"",
+        "B": "\"Wait\"",
+        "sigma": "0.1"
+      }
     },
     "lambda": {
-      "A == \"Ball\"": {
+      "A == \"Send\"": {
         "send": "\"A:ball\""
       },
       "otherwise": {
@@ -38,5 +47,7 @@
     "ta": {
       "otherwise": "sigma"
     }
-  }
+  },
+  "parameters": {},
+  "include_sets": []
 }

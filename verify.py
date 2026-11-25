@@ -154,6 +154,30 @@ def check_arithmetic(folder):
     print("generator arithmetic OK: 1.0/2.0 is 0.5")
 
 
+def check_message_list(folder):
+    """A list on a lambda port sends one message per element, in order."""
+    burst = write_model(folder, "burst", timer_body(**{"lambda": {
+        "sigma == 1.0": {"out": ["0.5", "0.25"]}, "otherwise": {}}}),
+        {"sigma": "1.0"})
+    got = [(e["time"], e["port"], e["value"])
+           for e in cadmium_api.simulate(burst, 2.0)]
+    check(got == [(1.0, "out", "0.5"), (1.0, "out", "0.25")],
+          f"lambda list: {got}")
+    print("lambda list OK: [0.5, 0.25] on one port sends both at t = 1.0")
+
+
+def check_simultaneous_assignments(folder):
+    """A branch's assignments happen at once: {"a": "b", "b": "a"} swaps."""
+    swap = write_model(folder, "swap", timer_body(
+        s={"a": "double", "b": "double", "sigma": "double"},
+        delta_int={"otherwise": {"a": "b", "b": "a", "sigma": "1.0"}},
+        **{"lambda": {"otherwise": {"out": "a"}}}),
+        {"a": "1.0", "b": "2.0", "sigma": "1.0"})
+    values = [e["value"] for e in cadmium_api.simulate(swap, 3.5)]
+    check(values == ["1", "2", "1"], f"swap: a was {values}")
+    print("simultaneous assignments OK: {a: b, b: a} swaps a and b")
+
+
 def check_stray_files(folder):
     """Unrelated model files next to the simulated one are ignored."""
     for name in os.listdir(MODELS):
@@ -174,15 +198,15 @@ def check_fuse_verifier():
     check((reference.window, reference.horizon) == (1.0, fuse.MIN_HORIZON),
           f"fuse reference: window {reference.window}, "
           f"horizon {reference.horizon}")
-    ok, info = fuse.verify(HAND_FUSED, reference)
+    ok, info = fuse.matches_reference(HAND_FUSED, reference)
     check(ok, f"fuse verifier rejected the hand fusion: {info}")
     print(f"fuse verifier OK: accepts the hand fusion ({info})")
 
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
-        ok, info = fuse.verify(slow_ball(tmp), reference)
+        ok, info = fuse.matches_reference(slow_ball(tmp), reference)
         check(not ok and "trace mismatch" in info,
               f"fuse verifier on a wrong timer: {ok}, {info}")
-        ok, info = fuse.verify(count_to_ten(tmp), reference)
+        ok, info = fuse.matches_reference(count_to_ten(tmp), reference)
         check(not ok and "after that window" in info,
               f"fuse verifier on a horizon cheat: {ok}, {info}")
     print("fuse verifier OK: rejects a wrong timer and a horizon cheat")
@@ -193,7 +217,7 @@ def check_reference_window(folder):
     one with nothing after the window is refused."""
     timer = write_model(folder, "timer", timer_body(
         delta_int={"otherwise": {"sigma": "0.3"}}), {"sigma": "0.3"})
-    ok, info = fuse.verify(timer, fuse.reference_run(timer))
+    ok, info = fuse.matches_reference(timer, fuse.reference_run(timer))
     check(ok, f"a period-0.3 timer failed against itself: {info}")
     expect_error(ValueError, "no output events after", "fusing a model "
                  "that stops after the window", fuse.reference_run,
@@ -256,7 +280,8 @@ def selftest():
 def run_checks():
     check_flatten()
     check_coupled_trace()
-    for run in (check_arithmetic, check_stray_files):
+    for run in (check_arithmetic, check_message_list,
+                check_simultaneous_assignments, check_stray_files):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             run(tmp)
     check_fuse_verifier()
