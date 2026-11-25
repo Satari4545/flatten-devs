@@ -82,8 +82,8 @@ own headers (e.g. `devsmap/<model>_functions.hpp`).
 
 - Generator: github.com/HazelGriffith/DEVSMap_to_Cadmium_Generator,
   submodule `third_party/devsmap_generator`, pinned to its unmerged
-  `per-instance-initial-states` branch. It handles only internal
-  couplings (no EIC/EOC); an atomic model runs as component `top` of a
+  `per-instance-initial-states` branch. It generates coupled-model
+  ports, EIC and EOC; an atomic model runs as component `top` of a
   generated coupled model `wrapper`.
 - Cadmium: submodule `cadmium_v2`, branch `dev-rt`.
 - Compile: `g++ -std=c++17 -O1`, plus `-static` on Windows, then
@@ -180,18 +180,24 @@ In dependency order.
 
 ### 1 Upstream the generator fixes
 
-Get the saved fix (per-instance initial states for multi-instance
-components) merged into James's generator and repin
-`third_party/devsmap_generator` to his main. The same PR switches his
-`main.cpp` to `CSVLogger` (`logfile.csv`) and adds `bag(i)` for i >= 0
-and `delta_con`.
+Get the pinned `per-instance-initial-states` branch (PR #1 on James's
+generator, 12 commits) merged and repin `third_party/devsmap_generator`
+to his main. The PR:
+
+- gives each instance of a component its own initial state;
+- logs with `CSVLogger` (`logfile.csv`);
+- translates `bag(i)` for i >= 0, bag values in conditions, `delta_con`,
+  `inf`, `nan`, array literals and string concatenation;
+- maps the paper's set names to C++ types and prefixes state variables
+  by whole-name match;
+- generates coupled-model ports, EIC and EOC;
+- sends a lambda list as several messages on one port, generates nested
+  condition maps and applies a branch's assignments at once.
 
 ### 2 Close the remaining generator gaps
 
 Also upstream, each needed by a later item:
 
-- **EIC/EOC and coupled-model ports**, for open models (3) and nested
-  models (4).
 - **Init states per nesting level**: check that a nested component gets
   its state from the hierarchical init file, and fix it if not.
 - **Multi-branch `ta`**: SKILL.md forbids it until the generator
@@ -199,7 +205,8 @@ Also upstream, each needed by a later item:
 
 ### 3 Open models: input scripts
 
-Needs 2. Today nothing drives input ports, so open models are only
+The generator has the ports, EIC and EOC (1), but nothing drives input
+ports yet, so open models are only
 compiled. Generate input scripts and feed the same script to the original
 and the proposal: cases from the model's ports and value sets, seeded
 random scripts (the seed is logged), inputs exactly on internal event
