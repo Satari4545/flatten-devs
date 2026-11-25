@@ -1,0 +1,847 @@
+"""Encode DEVSMap atomic models in Z3 (pip install z3-solver).
+
+    Encoding(definition_paths)     Z3 sorts, values and expressions
+    Atomic(encoding, name, body)   an atomic model's functions on symbolic
+                                   states
+    show(value)                    a concrete value (from a model) as text
+    duration, time_left, earliest, at, before, by
+                                   times, as floating_point values
+    all_of, any_of, ite            Boolean and if-then-else builders
+    concat(parts, sort)            sequences one after the other
+    within(where, run, *args)      run, naming `where` in its ValueError
+
+context.md, "Proving a fusion", describes how each domain and operator is
+encoded and what that assumes.
+"""
+
+import fractions
+import functools
+import json
+import math
+import operator
+
+import z3
+
+import devsmap
+from devsmap_expr import parse
+
+_float = z3.Datatype("floating_point")
+_float.declare("fin", ("val", z3.RealSort()))  # fin(0) is +0.0
+_float.declare("nzero")                         # -0.0
+_float.declare("pinf")
+_float.declare("ninf")
+_float.declare("nan", ("negative", z3.BoolSort()))
+FLOAT = _float.create()
+INF, NINF, NZERO = FLOAT.pinf, FLOAT.ninf, FLOAT.nzero
+INVALID = FLOAT.nan(z3.BoolVal(True))  # x86 gives -nan for inf - inf
+_KINDS = {kind: FLOAT.constructor(i)
+          for i, kind in enumerate(("fin", "nzero", "pinf", "ninf", "nan"))}
+
+INT, BOOL, STRING = z3.IntSort(), z3.BoolSort(), z3.StringSort()
+TRUE, FALSE = z3.BoolVal(True), z3.BoolVal(False)
+_ZERO = z3.RealVal(0)
+_BASIC = {
+    "integer": INT, "int": INT, "long": INT, "char": INT,
+    "unsigned_integer": z3.BitVecSort(32), "unsigned int": z3.BitVecSort(32),
+    "unsigned": z3.BitVecSort(32), "size_t": z3.BitVecSort(64),
+    "floating_point": FLOAT, "double": FLOAT, "float": FLOAT,
+    "boolean": BOOL, "bool": BOOL,
+    "string": STRING, "std::string": STRING,
+}
+_CONSTANTS = {"true": TRUE, "false": FALSE, "inf": INF,
+              "nan": FLOAT.nan(FALSE)}
+RESERVED = {*_CONSTANTS, "e"}  # names no variable, port or parameter takes
+
+
+def _fin(x):
+    """A finite floating_point holding the Real (or number) x; 0 is +0.0."""
+    return FLOAT.fin(x)
+
+
+# Boolean and if-then-else builders that fold literal true and false, so
+# operations on literal values stay small.
+def all_of(*cs):
+    cs = [c for c in cs if not z3.is_true(c)]
+    if any(z3.is_false(c) for c in cs):
+        return FALSE
+    return z3.And(cs) if len(cs) > 1 else cs[0] if cs else TRUE
+
+
+def any_of(*cs):
+    cs = [c for c in cs if not z3.is_false(c)]
+    if any(z3.is_true(c) for c in cs):
+        return TRUE
+    return z3.Or(cs) if len(cs) > 1 else cs[0] if cs else FALSE
+
+
+def _not(c):
+    return FALSE if z3.is_true(c) else TRUE if z3.is_false(c) else z3.Not(c)
+
+
+def _xor(p, q):
+    if z3.is_true(p) or z3.is_false(p):
+        return _not(q) if z3.is_true(p) else q
+    if z3.is_true(q) or z3.is_false(q):
+        return _not(p) if z3.is_true(q) else p
+    return z3.Xor(p, q)
+
+
+def ite(c, a, b):
+    """If(c, a, b), folded when c is a literal or a and b are the same."""
+    if z3.is_true(c) or a.eq(b):
+        return a
+    return b if z3.is_false(c) else z3.If(c, a, b)
+
+
+def concat(parts, sort):
+    """The sequences `parts` of elements of `sort`, one after the other."""
+    if len(parts) > 1:
+        return z3.Concat(parts)
+    return parts[0] if parts else z3.Empty(z3.SeqSort(sort))
+
+
+def _kind(a):
+    """Which FLOAT constructor builds `a`, if `a` is a constructor term."""
+    if z3.is_app(a):
+        return next((k for k, decl in _KINDS.items() if a.decl().eq(decl)),
+                    None)
+    return None
+
+
+def _is(kind, a):
+    known = _kind(a)
+    if known is not None:
+        return z3.BoolVal(known == kind)
+    return getattr(FLOAT, f"is_{kind}")(a)
+
+
+def _finite(a):
+    return any_of(_is("fin", a), _is("nzero", a))
+
+
+def _real(a):
+    """The Real value of a finite a."""
+    kind = _kind(a)
+    if kind == "fin":
+        return a.arg(0)
+    return _ZERO if kind == "nzero" else ite(_is("nzero", a), _ZERO,
+                                             FLOAT.val(a))
+
+
+def _rational(x):
+    return x.as_fraction() if z3.is_rational_value(x) else None
+
+
+_REAL_OPS = {"+": operator.add, "-": operator.sub, "*": operator.mul,
+             "/": operator.truediv, "<": operator.lt, "==": operator.eq,
+             ">": operator.gt}
+
+
+def _real_op(op, x, y):
+    """x op y on Reals, folded when both are numerals."""
+    px, py = _rational(x), _rational(y)
+    if px is None or py is None or (op == "/" and py == 0):
+        return _REAL_OPS[op](x, y)
+    value = _REAL_OPS[op](px, py)
+    return z3.BoolVal(value) if isinstance(value, bool) else \
+        z3.RealVal(str(value))
+
+
+def _signbit(a):
+    """For a non-NaN a: whether it is negative (-0.0 and -inf too)."""
+    return any_of(_is("nzero", a), _is("ninf", a),
+                  all_of(_is("fin", a), _real_op("<", _real(a), _ZERO)))
+
+
+def _zero(a):
+    return any_of(_is("nzero", a),
+                  all_of(_is("fin", a), _real_op("==", _real(a), _ZERO)))
+
+
+def _make(x, negative):
+    """The finite floating_point x; when x is 0, -0.0 if `negative`."""
+    return ite(all_of(_real_op("==", x, _ZERO), negative), NZERO, _fin(x))
+
+
+def _f_neg(a):
+    return ite(_finite(a), _make(_real_op("-", _ZERO, _real(a)),
+                                 _not(_signbit(a))),
+               ite(_is("pinf", a), NINF,
+                   ite(_is("ninf", a), INF,
+                       FLOAT.nan(z3.Not(FLOAT.negative(a))))))
+
+
+def _exact(op, a, b):
+    """a op b for finite a and b, with IEEE's signed zeros."""
+    x, y = _real(a), _real(b)
+    sign = _xor(_signbit(a), _signbit(b))
+    if op == "/":
+        return ite(_real_op("==", y, _ZERO),
+                   ite(_real_op("==", x, _ZERO), INVALID,
+                       ite(sign, NINF, INF)),
+                   _make(_real_op("/", x, y), sign))
+    negative = {"*": sign, "+": all_of(_signbit(a), _signbit(b)),
+                "-": all_of(_signbit(a), _not(_signbit(b)))}[op]
+    return _make(_real_op(op, x, y), negative)
+
+
+def _infinite(op, a, b):
+    """a op b when neither is NaN and one is infinite."""
+    if op == "+":
+        return ite(_finite(a), b,
+                   ite(_finite(b), a, ite(a == b, a, INVALID)))
+    if op == "-":
+        return ite(_finite(a), _f_neg(b),
+                   ite(_finite(b), a, ite(a == b, INVALID, a)))
+    sign = _xor(_signbit(a), _signbit(b))
+    if op == "*":
+        return ite(any_of(_zero(a), _zero(b)), INVALID,
+                   ite(sign, NINF, INF))
+    return ite(_finite(a), ite(sign, NZERO, _fin(0)),
+               ite(_finite(b), ite(sign, NINF, INF), INVALID))
+
+
+def _f_arith(op, a, b):
+    """a op b for op in + - * / on FLOAT values."""
+    both = all_of(_finite(a), _finite(b))
+    if z3.is_true(both):
+        return _exact(op, a, b)
+    special = ite(_is("nan", a), a,
+                  ite(_is("nan", b), b, _infinite(op, a, b)))
+    return ite(both, _exact(op, a, b), special)
+
+
+def _f_lt(a, b):
+    both = all_of(_finite(a), _finite(b))
+    if z3.is_true(both):
+        return _real_op("<", _real(a), _real(b))
+    return all_of(_not(_is("nan", a)), _not(_is("nan", b)),
+                  ite(both, _real_op("<", _real(a), _real(b)),
+                      any_of(all_of(_is("ninf", a), _not(_is("ninf", b))),
+                             all_of(_not(_is("pinf", a)), _is("pinf", b)))))
+
+
+def _f_eq(a, b):
+    """IEEE a == b: false if either is NaN, -0.0 == 0.0."""
+    both = all_of(_finite(a), _finite(b))
+    if z3.is_true(both):
+        return _real_op("==", _real(a), _real(b))
+    return all_of(_not(_is("nan", a)), _not(_is("nan", b)),
+                  ite(both, _real_op("==", _real(a), _real(b)), a == b))
+
+
+def _f_le(a, b):
+    return any_of(_f_lt(a, b), _f_eq(a, b))
+
+
+def _f_min(a, b):
+    return ite(_f_le(a, b), a, b)
+
+
+# Time, for the prover: elapsed and event times are Reals, a time advance
+# (and a time left until it) a floating_point.
+def duration(t):
+    """A Real time as a floating_point."""
+    return _fin(t)
+
+
+def time_left(ta, e):
+    """ta - e: the time until the next internal event, e after the last."""
+    return _f_arith("-", ta, _fin(e))
+
+
+def earliest(times):
+    """The least of floating_point times."""
+    return functools.reduce(_f_min, times)
+
+
+def at(t, time):
+    """Whether the Real t is the floating_point time."""
+    return _f_eq(_fin(t), time)
+
+
+def before(t, time):
+    return _f_lt(_fin(t), time)
+
+
+def by(t, time):
+    return _f_le(_fin(t), time)
+
+
+def _float_op(op, a, b):
+    if op in ("<", ">"):
+        return _f_lt(a, b) if op == "<" else _f_lt(b, a)
+    if op in ("<=", ">="):
+        return _f_le(a, b) if op == "<=" else _f_le(b, a)
+    if op in ("==", "!="):
+        return _f_eq(a, b) if op == "==" else _not(_f_eq(a, b))
+    if op == "%":
+        raise ValueError("% of floating_point values")
+    return _f_arith(op, a, b)
+
+
+def _int_div(a, b):
+    """C++ a / b on integers: truncates toward zero."""
+    q = z3.If(a >= 0, a, -a) / z3.If(b >= 0, b, -b)
+    return z3.If((a >= 0) == (b >= 0), q, -q)
+
+
+_INT_OPS = {"+": operator.add, "-": operator.sub, "*": operator.mul,
+            "/": _int_div, "%": lambda a, b: a - b * _int_div(a, b),
+            "<": operator.lt, ">": operator.gt, "<=": operator.le,
+            ">=": operator.ge, "==": operator.eq, "!=": operator.ne}
+# Unsigned integers wrap around, as in C++.
+_UNSIGNED_OPS = {**_INT_OPS, "/": z3.UDiv, "%": z3.URem, "<": z3.ULT,
+                 ">": z3.UGT, "<=": z3.ULE, ">=": z3.UGE}
+
+
+def _unsigned(sort):
+    return isinstance(sort, z3.BitVecSortRef)
+
+
+def _numeric(sort):
+    return sort in (INT, FLOAT) or _unsigned(sort)
+
+
+def _narrower(sort, low, high):
+    """Whether the bounds low..high (texts) leave out values of a numeric
+    sort; a bound that is not a number counts as leaving some out."""
+    least, greatest = ((0, 2 ** sort.size() - 1) if _unsigned(sort)
+                       else (-math.inf, math.inf))
+    try:
+        low, high = (float(b) if "inf" in b else fractions.Fraction(b)
+                     for b in (low, high))
+    except ValueError:
+        return True
+    return low > least or high < greatest
+
+
+def _number(text):
+    if any(c in text for c in ".eE"):
+        return _fin(z3.RealVal(str(fractions.Fraction(text))))
+    return z3.IntVal(int(text))
+
+
+class _Bag:
+    """An input port's bag: a Z3 sequence of its messages, in order."""
+
+    def __init__(self, seq):
+        self.seq = seq
+
+
+def _plain(v):
+    """v, if it is a value (not a _Bag or a dict of names)."""
+    if isinstance(v, _Bag):
+        raise ValueError("an input port is read only through bagSize() and "
+                         "bag(i)")
+    if isinstance(v, dict):
+        raise ValueError(f"{', '.join(v)}: not a value")
+    return v
+
+
+def _sort_name(sort):
+    if sort == FLOAT:
+        return "floating_point"
+    if _unsigned(sort):
+        return f"{sort.size()}-bit unsigned integer"
+    if isinstance(sort, z3.SeqSortRef) and not sort == STRING:
+        return f"array of {_sort_name(sort.basis())}"
+    return {INT: "integer", BOOL: "boolean", STRING: "string"}.get(
+        sort, sort.name())
+
+
+class Encoding:
+    """Z3 sorts for DEVSMap domains, and the values of expressions.
+
+    `params` maps parameter names to their values; a scope (a dict) maps
+    the other names an expression may use to a Z3 value, a _Bag, or a dict
+    of further names (`a.b` looks b up in a).
+    """
+
+    def __init__(self, definition_paths):
+        self.params = {}
+        self._sets = {}
+        for path in definition_paths:
+            for name, fields in devsmap.read_json(path).items():
+                if name in _BASIC:
+                    continue
+                if self._sets.get(name, fields) != fields:
+                    raise ValueError(f"set {name} has different definitions "
+                                     f"in the definitions files")
+                self._sets[name] = fields
+        self._structs = {}
+        self._functions = {}
+        self._results = {}  # declared result sorts of the models' functions
+        self.assumed = set()  # functions called whose result is assumed
+        self.constant_calls = set()  # functions called with no arguments
+        self.ranges = {}  # sets used whose range is not encoded: name -> text
+
+    def define_parameters(self, domains, values):
+        """Parameters {name: domain}, each with the value of its expression
+        in `values`, else any value (a symbol)."""
+        reserved = sorted(RESERVED & set(domains))
+        if reserved:
+            raise ValueError(f"{', '.join(reserved)} is a reserved name, not "
+                             f"a parameter")
+        self.params = {
+            name: within(f"parameter {name}", self.value, values[name],
+                         self.sort(domain), {}) if name in values
+            else z3.Const(name, self.sort(domain))
+            for name, domain in domains.items()}
+
+    def declare_functions(self, domains):
+        """Give the functions the models call result domains {name:
+        domain}; an undeclared one returns a floating_point."""
+        for name, domain in domains.items():
+            if name in self._sets:
+                raise ValueError(f"{name} is a set, not a function")
+            self._results[name] = within(f"function {name}", self.sort,
+                                         domain)
+
+    def sort(self, domain):
+        """The Z3 sort of a domain (a set name)."""
+        if domain in _BASIC:
+            return _BASIC[domain]
+        if domain not in self._structs:
+            if domain not in self._sets:
+                raise ValueError(f"unknown domain {domain!r}: not a basic "
+                                 f"set and in no definitions file")
+            self._structs[domain] = None  # being made: catches recursion
+            fields = [(f"{domain}.{field}", self._field_sort(spec))
+                      for field, spec in self._sets[domain].items()]
+            datatype = z3.Datatype(domain)
+            datatype.declare(domain, *fields)
+            self._structs[domain] = datatype.create()
+            self._note_range(domain)
+        elif self._structs[domain] is None:
+            raise ValueError(f"set {domain!r} contains itself")
+        return self._structs[domain]
+
+    def _note_range(self, name):
+        """Note a set of one numeric field whose min or max is narrower
+        than the field's domain: its C++ type may be narrower too."""
+        specs = list(self._sets[name].values())
+        if len(specs) != 1:
+            return
+        low, high = (str(specs[0].get(k, default))
+                     for k, default in (("min", "-inf"), ("max", "+inf")))
+        sort = self.sort(specs[0]["domain"])
+        if _numeric(sort) and _narrower(sort, low, high):
+            self.ranges[name] = f"{low}..{high}"
+
+    def _field_sort(self, spec):
+        base = self.sort(spec["domain"])
+        return base if spec.get("dimension", ["1"]) == ["1"] else \
+            z3.SeqSort(base)
+
+    def fields(self, sort):
+        """The field names of a struct sort, else None."""
+        name = sort.name()
+        return list(self._sets[name]) if name in self._structs else None
+
+    def _only_field(self, sort):
+        """The accessor of a struct sort's field if it has just one."""
+        fields = self.fields(sort)
+        return sort.accessor(0, 0) if fields and len(fields) == 1 else None
+
+    def _unwrap(self, v):
+        """A value of a set of one field as that field's value."""
+        field = self._only_field(_plain(v).sort())
+        return v if field is None else field(v)
+
+    def value(self, expr, sort, scope):
+        """The value of an expression (text or syntax tree) as `sort`."""
+        node = parse(expr) if isinstance(expr, str) else expr
+        if node[0] == "array" and isinstance(sort, z3.SeqSortRef):
+            return self._array(node[1], sort.basis(), scope)
+        return self.convert(self.eval(node, scope), sort)
+
+    def condition(self, expr, scope):
+        return self.value(expr, BOOL, scope)
+
+    def convert(self, v, sort):
+        """C++'s implicit conversion of a value to `sort`. A set of one
+        field converts like that field, as a C++ alias of its type would."""
+        have = _plain(v).sort()
+        if have == sort:
+            return v
+        field = self._only_field(sort)
+        if field is not None:
+            return sort.constructor(0)(self.convert(v, field.range()))
+        if self._only_field(have) is not None:
+            return self.convert(self._unwrap(v), sort)
+        if have == BOOL and _numeric(sort):
+            return self.convert(z3.If(v, z3.IntVal(1), z3.IntVal(0)), sort)
+        if sort == BOOL and _numeric(have):
+            return _not(_f_eq(v, _fin(0))) if have == FLOAT else v != 0
+        if sort == FLOAT and have != FLOAT and _numeric(have):
+            return _fin(z3.ToReal(v if have == INT else z3.BV2Int(v)))
+        if sort == INT and have == FLOAT:
+            x = _real(v)
+            truncated = z3.If(x >= 0, z3.ToInt(x), -z3.ToInt(-x))
+            undefined = self.function("float_to_int", [FLOAT], INT)(v)
+            return ite(_finite(v), truncated, undefined)
+        if sort == INT and _unsigned(have):
+            low = v if have.size() <= 32 else z3.Extract(31, 0, v)
+            return z3.BV2Int(low, is_signed=True)
+        if _unsigned(sort) and _unsigned(have):
+            n, m = sort.size(), have.size()
+            return z3.ZeroExt(n - m, v) if n > m else z3.Extract(n - 1, 0, v)
+        if _unsigned(sort) and _numeric(have):
+            x = self.convert(v, INT)
+            if z3.is_int_value(x):
+                return z3.BitVecVal(x.as_long() % 2 ** sort.size(),
+                                    sort.size())
+            return z3.Int2BV(x, sort.size())
+        raise ValueError(f"a {_sort_name(have)} where a {_sort_name(sort)} is "
+                         f"expected")
+
+    def function(self, name, sorts, result):
+        """The uninterpreted function `name` from `sorts` to `result`."""
+        key = (name, *sorts, result)
+        if key not in self._functions:
+            self._functions[key] = z3.Function(name, *sorts, result)
+        return self._functions[key]
+
+    def eval(self, node, scope):
+        """The Z3 value of a syntax tree (devsmap_expr) in a scope."""
+        kind = node[0]
+        if kind == "num":
+            return _number(node[1])
+        if kind == "str":
+            return z3.StringVal(node[1])
+        if kind == "name":
+            return self._name(node[1], scope)
+        if kind == "member":
+            return self._member(self.eval(node[1], scope), node[2])
+        if kind == "method":
+            return self._bag_op(self.eval(node[1], scope), node[2], node[3],
+                                scope)
+        if kind == "call":
+            return self._call(node[1], node[2], scope)
+        if kind == "array":
+            return self._array(node[1], None, scope)
+        if kind == "neg":
+            return self._negate(self.eval(node[1], scope))
+        if kind == "concat":
+            return z3.Concat([self._text(part, scope) for part in node[1]])
+        a, b = self.eval(node[2], scope), self.eval(node[3], scope)
+        if node[1] in ("/", "%"):
+            self._check_division(node, a, b)
+        return self._binary(node[1], a, b)
+
+    def _assumes(self, node):
+        """Whether a syntax tree calls a function of assumed domain."""
+        if node[0] == "call" and node[1] not in {*self._sets,
+                                                 *self._results}:
+            return True
+        return any(self._assumes(part)
+                   for child in node[1:] if isinstance(child, (tuple, list))
+                   for part in (child if isinstance(child, list) else [child]))
+
+    def _check_division(self, node, a, b):
+        """Refuse a / or % that C++ might do on integers, through a function
+        whose result is only assumed floating_point."""
+        op, left, right = node[1:]
+        for side, other, value in ((left, right, b), (right, left, a)):
+            if self._assumes(side) and (op == "%" or self._assumes(other)
+                                        or _plain(value).sort() != FLOAT):
+                raise ValueError(
+                    f"{op} on a function's result whose domain is only "
+                    f"assumed floating_point; C++ may divide integers here: "
+                    f"declare the function under \"functions\" in the "
+                    f"mapping file")
+
+    def _name(self, name, scope):
+        if name in scope:
+            return scope[name]
+        if name in _CONSTANTS:
+            return _CONSTANTS[name]
+        raise ValueError(f"unknown name {name!r}")
+
+    def _member(self, v, field):
+        if isinstance(v, dict):
+            if field not in v:
+                raise ValueError(f"unknown name {field!r} after '.'")
+            return v[field]
+        fields = None if isinstance(v, _Bag) else self.fields(v.sort())
+        if fields is None or field not in fields:
+            raise ValueError(f".{field} of a value without that field")
+        return self._structs[v.sort().name()].accessor(
+            0, fields.index(field))(v)
+
+    def _bag_op(self, bag, method, args, scope):
+        if not isinstance(bag, _Bag):
+            raise ValueError(f".{method}() of something not an input port")
+        size = z3.Length(bag.seq)
+        if method == "bagSize" and not args:
+            return size
+        if method == "bag" and len(args) == 1:
+            i = self.convert(self.eval(args[0], scope), INT)
+            if z3.is_int_value(i):
+                return bag.seq[i if i.as_long() >= 0 else size + i]
+            return bag.seq[z3.If(i >= 0, i, size + i)]
+        raise ValueError(f"unknown bag operation .{method}() with "
+                         f"{len(args)} arguments")
+
+    def _call(self, name, args, scope):
+        if name in self._sets:
+            make = self.sort(name).constructor(0)
+            if len(args) != make.arity():
+                raise ValueError(f"{name}(...) takes {make.arity()} values, "
+                                 f"got {len(args)}")
+            return make(*[self.value(a, make.domain(i), scope)
+                          for i, a in enumerate(args)])
+        values = [_plain(self.eval(a, scope)) for a in args]
+        if name not in self._results:
+            self.assumed.add(name)
+        if not args:
+            self.constant_calls.add(name)
+        return self.function(name, [v.sort() for v in values],
+                             self._results.get(name, FLOAT))(*values)
+
+    def _array(self, items, element, scope):
+        if element is None:
+            if not items:
+                raise ValueError("an empty array literal where its type "
+                                 "is unknown")
+            sorts = [self.eval(item, scope).sort() for item in items]
+            element = FLOAT if FLOAT in sorts else sorts[0]
+        return concat([z3.Unit(self.value(item, element, scope))
+                       for item in items], element)
+
+    def _negate(self, v):
+        sort = _plain(v).sort()
+        if sort == FLOAT:
+            return _f_neg(v)
+        return -v if _unsigned(sort) else -self.convert(v, INT)
+
+    def _text(self, part, scope):
+        """std::to_string of one operand of a "text" + x chain."""
+        v = _plain(self.eval(part, scope))
+        sort = v.sort()
+        if sort == STRING:
+            return v
+        if sort == BOOL:
+            return z3.If(v, z3.StringVal("1"), z3.StringVal("0"))
+        if _numeric(sort):
+            return self.function("to_string", [sort], STRING)(v)
+        raise ValueError(f"the text of a {_sort_name(sort)}")
+
+    def _binary(self, op, a, b):
+        a, b = self._unwrap(a), self._unwrap(b)
+        if op in ("&&", "||"):
+            a, b = self.convert(a, BOOL), self.convert(b, BOOL)
+            return all_of(a, b) if op == "&&" else any_of(a, b)
+        sorts = (a.sort(), b.sort())
+        if not all(_numeric(s) or s == BOOL for s in sorts) \
+                or sorts == (BOOL, BOOL):
+            if sorts == (STRING, STRING) and op == "+":
+                return z3.Concat(a, b)
+            if sorts[0] == sorts[1] and op in ("==", "!="):
+                return a == b if op == "==" else a != b
+            raise ValueError(f"{_sort_name(a.sort())} {op} "
+                             f"{_sort_name(b.sort())}")
+        # C++'s usual arithmetic conversions: double, else unsigned, else int
+        words = [s for s in sorts if _unsigned(s)]
+        sort = FLOAT if FLOAT in sorts else max(
+            words, key=lambda s: s.size()) if words else INT
+        a, b = self.convert(a, sort), self.convert(b, sort)
+        if sort == FLOAT:
+            return _float_op(op, a, b)
+        return (_UNSIGNED_OPS if words else _INT_OPS)[op](a, b)
+
+    def branches(self, cmap, scope, values=False):
+        """[(label, guard, body)]: each leaf of a (possibly nested)
+        condition map, its guard true exactly when the generator's
+        if/else-if chain takes it; where no key holds, the body is {}. In a
+        map of `values` (expressions), every dict is a nested map."""
+        found = []
+
+        def nested(body):
+            return isinstance(body, dict) and (values or any(
+                isinstance(v, dict) for v in body.values()))
+
+        def walk(m, guard, labels):
+            rest = guard
+            for key, body in m.items():
+                cond = (TRUE if key == "otherwise"
+                        else self.condition(key, scope))
+                taken, rest = all_of(rest, cond), all_of(rest, _not(cond))
+                if nested(body):
+                    walk(body, taken, labels + [key])
+                else:
+                    found.append((" / ".join(labels + [key]), taken, body))
+            if not z3.is_false(rest):
+                found.append((" / ".join(labels + ["(no key holds)"]), rest,
+                              {}))
+
+        walk(cmap, TRUE, [])
+        return found
+
+    def choose(self, cmap, sort, scope):
+        """The value of an expression, or of a condition map of
+        expressions, nested maps too, each ending with "otherwise"."""
+        if isinstance(cmap, str):
+            return self.value(cmap, sort, scope)
+        result = None
+        for label, guard, body in reversed(self.branches(cmap, scope, True)):
+            if not isinstance(body, str):
+                raise ValueError(f"{label}: a condition map of values needs "
+                                 f"\"otherwise\" last, nested ones too, and "
+                                 f"expressions as values")
+            v = self.value(body, sort, scope)
+            result = v if result is None else ite(guard, v, result)
+        return result
+
+
+def within(where, run, *args):
+    """run(*args), naming `where` in a ValueError."""
+    try:
+        return run(*args)
+    except ValueError as exc:
+        raise ValueError(f"{where}: {exc}") from None
+
+
+class Atomic:
+    """An atomic DEVSMap model's functions on symbolic states.
+
+    A state is a dict {state variable: Z3 value}; bags are a dict {input
+    port: Z3 sequence} (a missing port is empty); e is a FLOAT.
+    """
+
+    def __init__(self, encoding, name, body):
+        self.enc, self.name, self.body = encoding, name, body
+        self.s, self.x, self.y = (
+            {k: within(f"{name}.{key}.{k}", encoding.sort, d)
+             for k, d in body.get(key, {}).items()} for key in ("s", "x", "y"))
+        reserved = sorted(RESERVED & {*self.s, *self.x, *self.y})
+        if reserved:
+            raise ValueError(f"{name}: {', '.join(reserved)} is a reserved "
+                             f"name, not a state variable or port")
+        ta = body.get("ta")
+        if not (isinstance(ta, dict) and list(ta) == ["otherwise"]
+                and ta["otherwise"] in self.s):
+            raise ValueError(f"{name}.ta: must be {{\"otherwise\": "
+                             f"\"<state variable>\"}}, the only form the "
+                             f"generator translates")
+        self.sigma = ta["otherwise"]
+        con = body.get("delta_con")
+        self.own_confluent = bool(con) and con != {"otherwise": {}}
+
+    def scope(self, state, e=None, bags=None):
+        names = {**self.enc.params, **state}
+        if bags is not None:
+            names.update({p: _Bag(bags.get(p, z3.Empty(z3.SeqSort(sort))))
+                          for p, sort in self.x.items()})
+        if e is not None:
+            names["e"] = e
+        return names
+
+    def initial(self, values):
+        """The state set by an init-state entry {variable: expression}."""
+        if set(values) != set(self.s):
+            raise ValueError(f"{self.name}: the initial state sets "
+                             f"{sorted(values)}, the state variables are "
+                             f"{sorted(self.s)}")
+        return {v: within(f"{self.name} initial {v}", self.enc.value,
+                          values[v], sort, self.enc.params)
+                for v, sort in self.s.items()}
+
+    def ta(self, state):
+        return self.enc.convert(state[self.sigma], FLOAT)
+
+    def output(self, state):
+        """{output port: [(guard, message)]}: the messages lambda sends, in
+        order, each when its guard holds."""
+        return within(f"{self.name}.lambda", self._output, state)
+
+    def _output(self, state):
+        scope, sent = self.scope(state), {p: [] for p in self.y}
+        for label, guard, body in self.enc.branches(self.body["lambda"],
+                                                    scope):
+            for port, messages in body.items():
+                if port not in self.y:
+                    raise ValueError(f"{label!r}: {port} is not an output "
+                                     f"port")
+                for m in (messages if isinstance(messages, list)
+                          else [messages]):
+                    sent[port].append((guard, within(
+                        f"{label!r} {port}", self.enc.value, m, self.y[port],
+                        scope)))
+        return sent
+
+    def transitions(self, kind, state, e=None, bags=None):
+        """[(label, guard, next state)] for each branch of delta_<kind>
+        (kind: int, ext or con); a default delta_con is delta_int then
+        delta_ext with e = 0."""
+        if kind == "con" and not self.own_confluent:
+            return [(f"{label} (delta_int, then delta_ext)", guard,
+                     self.delta("ext", after, _fin(0), bags))
+                    for label, guard, after in self.transitions("int", state)]
+        where = f"{self.name}.delta_{kind}"
+        scope = self.scope(state, *((e, bags) if kind != "int" else ()))
+        found = []
+        for label, guard, body in within(where, self.enc.branches,
+                                         self.body[f"delta_{kind}"], scope):
+            unknown = set(body) - set(self.s)
+            if unknown:
+                raise ValueError(f"{where} {label!r}: assigns "
+                                 f"{', '.join(sorted(unknown))}, not state "
+                                 f"variables")
+            found.append((label, guard, {**state, **{
+                v: within(f"{where} {label!r} {v}", self.enc.value, x,
+                          self.s[v], scope) for v, x in body.items()}}))
+        return found
+
+    def delta(self, kind, state, e=None, bags=None):
+        """The next state after delta_<kind>."""
+        branches = self.transitions(kind, state, e, bags)
+        result = {}
+        for v, old in state.items():
+            for _, guard, after in reversed(branches):
+                old = ite(guard, after[v], old)
+            result[v] = old
+        return result
+
+
+def show(v):
+    """A concrete Z3 value (from a model) as DEVSMap-like text."""
+    sort = v.sort()
+    if sort == FLOAT:
+        kind = _kind(v)
+        if kind == "fin":
+            return _show_real(v.arg(0))
+        if kind == "nan":
+            return "-nan" if z3.is_true(v.arg(0)) else "nan"
+        return {"nzero": "-0.0", "pinf": "inf", "ninf": "-inf"}.get(
+            kind, str(v))
+    if sort == STRING and z3.is_string_value(v):
+        return json.dumps(v.as_string())
+    if z3.is_int_value(v) or z3.is_true(v) or z3.is_false(v):
+        return str(v).lower()
+    if z3.is_bv_value(v):
+        return str(v.as_long())
+    if isinstance(sort, z3.SeqSortRef):
+        return f"[{', '.join(show(x) for x in _elements(v))}]"
+    if isinstance(sort, z3.DatatypeSortRef) and z3.is_app(v):
+        return f"{v.decl().name()}({', '.join(show(a) for a in v.children())})"
+    return str(v)
+
+
+def _elements(seq):
+    if z3.is_app(seq) and seq.decl().name() == "seq.unit":
+        return [seq.arg(0)]
+    if z3.is_app(seq) and seq.decl().name() == "seq.++":
+        return [x for part in seq.children() for x in _elements(part)]
+    return []
+
+
+def _show_real(x):
+    if not z3.is_rational_value(x):
+        return x.as_decimal(10) if z3.is_algebraic_value(x) else str(x)
+    q = x.as_fraction()
+    text = f"{float(q):.15g}"
+    if fractions.Fraction(text) == q:
+        return text if any(c in text for c in ".en") else text + ".0"
+    return f"{q.numerator}/{q.denominator}"

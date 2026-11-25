@@ -1,0 +1,14 @@
+{
+  "mapping": {
+    "fused_pingpong": {
+      "A": "A.phase",
+      "B": "B.phase",
+      "sigma": "ta"
+    }
+  },
+  "invariant": [
+    "(A.phase == \"Send\" && B.phase == \"Wait\") || (A.phase == \"Wait\" && B.phase == \"Send\")",
+    "A.phase == \"Send\" || A.sigma == inf",
+    "B.phase == \"Send\" || B.sigma == inf"
+  ]
+}

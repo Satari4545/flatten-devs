@@ -1,9 +1,11 @@
-"""Check suite for flattening, the Cadmium backend and the fuse loop.
+"""Check suite for flattening, the Cadmium backend, the fuse loop and the
+prover.
 
     run_checks()  every check (python main.py --check)
     selftest()    the fuse verifier on the hand fusion (main.py --selftest)
 
-A failed check raises CheckFailed. Needs g++; the LLM is stubbed.
+A failed check raises CheckFailed. Needs g++ and z3-solver; the LLM is
+stubbed.
 """
 
 import contextlib
@@ -26,6 +28,7 @@ FIXTURES = os.path.join(REPO, "fixtures")
 COUPLED = os.path.join(MODELS, "pingpong_coupled.json")
 HAND_FUSED = os.path.join(FIXTURES, "fused_pingpong_atomic.json")
 HAND_FUSED_INIT = os.path.join(FIXTURES, "fused_pingpong_init_state.json")
+HAND_MAPPING = os.path.join(FIXTURES, "fused_pingpong_mapping.json")
 
 
 class CheckFailed(Exception):
@@ -134,6 +137,32 @@ def check_flatten():
     check(phases == ["\"Send\"", "\"Wait\""],
           f"flatten: initial phases {phases}")
     print("flatten OK: A, B + 2 couplings, per-instance initial states")
+
+
+def check_bag_order(folder):
+    """A nested leaf's input bag: its level's ic sources, then each eic's
+    (whose bag holds the outer ic sources, then the model's input)."""
+    cell = {"x": {"i": "int"}, "y": {"o": "int"}, "s": {}}
+    inputs = devsmap_flatten.flatten(devsmap.load_model(
+        write_model(folder, "cell", cell, {})))["inputs"]
+    check(inputs == [("i", "cell", "i")], f"an atomic's inputs: {inputs}")
+    write_model(folder, "inner", {
+        "x": {"q": "int"}, "y": {}, "components": {"cell": ["L", "M"]},
+        "eic": [{"port_from": "q", "component_to": "L", "port_to": "i"}],
+        "ic": [{"component_from": "M", "port_from": "o", "component_to": "L",
+                "port_to": "i"}], "eoc": []}, {}, kind="coupled")
+    outer = write_model(folder, "outer", {
+        "x": {"r": "int"}, "y": {}, "components": {"inner": "P", "cell": "N"},
+        "eic": [{"port_from": "r", "component_to": "P", "port_to": "q"}],
+        "ic": [{"component_from": "N", "port_from": "o", "component_to": "P",
+                "port_to": "q"}], "eoc": []},
+        {"P": {"L": {}, "M": {}}, "N": {}}, kind="coupled")
+    bag = devsmap_flatten.flatten(devsmap.load_model(outer))["bags"][
+        ("P.L", "i")]
+    check(bag == [("P.M", "o"), ("N", "o"), (None, "r")],
+          f"bag order: P.L.i gets {bag}")
+    print("bag order OK: a nested input port gets its own level's "
+          "couplings first, then the outer ones, then the model's input")
 
 
 def check_coupled_trace():
@@ -273,18 +302,230 @@ def check_fuse_loop(folder):
           "a model without outputs refused")
 
 
+def check_encoding(folder):
+    """The prover's encoding keeps C++'s corner cases: unsigned integers
+    wrap around, zeros are signed, a leading zero is octal, a set of one
+    field converts like that field, and its range is an assumption."""
+    import z3
+    import devsmap_z3
+    import prove
+
+    definitions = os.path.join(folder, "level_definitions.json")
+    devsmap.write_json(definitions, {
+        name: {"value": {"domain": "unsigned_integer", "min": "0",
+                         "max": high, "dimension": ["1"]}}
+        for name, high in (("level", "255"), ("count", "+inf"))})
+    enc = devsmap_z3.Encoding([definitions])
+    scope = {"u": z3.Const("u", enc.sort("unsigned_integer")),
+             "n": z3.Const("n", enc.sort("count"))}
+    unranged = prove.assumptions(enc)
+    scope["v"] = enc.value("u", enc.sort("level"), scope)
+    added = prove.assumptions(enc)[len(unranged):]
+    check(unranged == list(prove.ASSUMPTIONS) and len(added) == 1
+          and "within it: level 0..255;" in added[0],
+          f"encoding: level's range 0..255 assumed as {added}")
+    for text in ["u != 0 || u - 1 == 4294967295", "u >= 0", "u <= -1",
+                 "1.0 / -0.0 == -inf", "-0.0 == 0.0", "0.0 * -1.0 == 0.0",
+                 "v == u", "v.value + 1 == u + 1", "v == level(u)"]:
+        solver = z3.Solver()
+        solver.add(z3.Not(enc.condition(text, scope)))
+        check(solver.check() == z3.unsat, f"encoding: {text} not always true")
+    expect_error(ValueError, "leading zero", "encoding 010",
+                 enc.condition, "010 == 8", {})
+    halve = ("abs(i) / 2", {"i": z3.Int("i")})
+    expect_error(ValueError, "only assumed floating_point",
+                 "dividing by 2 an undeclared function's result", enc.value,
+                 halve[0], devsmap_z3.FLOAT, halve[1])
+    enc.declare_functions({"abs": "integer"})
+    enc.value(halve[0], devsmap_z3.FLOAT, halve[1])  # now an int division
+    enc.choose({"i > 0": {"i > 5": "2", "otherwise": "1"}, "otherwise": "0"},
+               z3.IntSort(), halve[1])
+    expect_error(ValueError, "needs \"otherwise\" last, nested ones too",
+                 "a nested value map without otherwise", enc.choose,
+                 {"i > 0": {"i > 5": "2"}, "otherwise": "0"}, z3.IntSort(),
+                 halve[1])
+    expect_error(ValueError, "e is a reserved name", "a state variable e",
+                 devsmap_z3.Atomic, enc, "m",
+                 timer_body(s={"e": "double", "sigma": "double"}))
+    expect_error(ValueError, "the only form", "a ta expression",
+                 devsmap_z3.Atomic, enc, "m",
+                 timer_body(ta={"otherwise": "sigma * 2.0"}))
+    print("encoding OK: unsigned wraparound, signed zeros, a set of one "
+          "field as its field, its range an assumption once used; no octal "
+          "literal, reserved name or ta other than a state variable")
+
+
+def proving(coupled, fused, prune=False):
+    """(prove.prove's Report, what it printed)."""
+    import prove  # the prover's checks need z3-solver, --selftest does not
+    log = io.StringIO()
+    with contextlib.redirect_stdout(log):
+        report = prove.prove(coupled, fused, prune)
+    return report, log.getvalue()
+
+
+def hand_fusion_variant(folder, change, invariant=()):
+    """The hand fusion and its mapping, written to a new folder in `folder`
+    after change(body) and with more invariant conditions."""
+    folder = tempfile.mkdtemp(dir=folder)
+    body, init = hand_fused()
+    change(body)
+    path = write_model(folder, "fused_pingpong", body, init)
+    mapping = devsmap.read_json(HAND_MAPPING)
+    mapping["invariant"] += invariant
+    devsmap.write_json(os.path.join(folder, "fused_pingpong_mapping.json"),
+                       mapping)
+    return path
+
+
+def check_prove_pingpong(folder):
+    report, text = proving(COUPLED, HAND_FUSED)
+    check(report.proven, f"prove: the hand fusion is not proven:\n{text}")
+
+    def wrong_sender(body):
+        body["lambda"]["otherwise"]["send"] = "\"A:ball\""
+
+    def ball_stays(body):
+        body["delta_int"]["otherwise"]["B"] = "\"Send\""
+
+    for change, expected in [
+            (wrong_sender, 'output on send: expected ["B:ball"], '
+                           'got ["A:ball"]'),
+            (ball_stays, 'fused B: expected "Wait", got "Send"')]:
+        report, text = proving(COUPLED,
+                               hand_fusion_variant(folder, change))
+        check(not report.proven and expected in text,
+              f"prove: no counterexample with {expected!r}:\n{text}")
+
+    stuck = 'A.phase == "Send"'
+    path = hand_fusion_variant(folder, lambda body: None, [stuck])
+    report, text = proving(COUPLED, path)
+    check(report.failed == ["invariant kept by internal events"]
+          and f"breaks: {stuck}" in text,
+          f"prove: the non-inductive {stuck} is not reported:\n{text}")
+    report, text = proving(COUPLED, path, prune=True)
+    check(report.proven and report.dropped == [stuck],
+          f"prove --prune: {stuck} not dropped:\n{text}")
+    print("prove OK: the hand fusion is proven; a wrong sender and a wrong "
+          "next phase get counterexamples; a non-inductive invariant "
+          "condition is reported, and --prune drops it")
+
+
+def check_prove_unknown():
+    """Z3 giving up is never a proof, the initial state included."""
+    import prove
+    with mock.patch.object(prove, "_query",
+                           lambda premises, goal: ("unknown", "stubbed")):
+        report, text = proving(COUPLED, HAND_FUSED)
+    check(not report.proven and "init" in report.failed
+          and "unknown to Z3 (stubbed)" in text,
+          f"prove: Z3 giving up on the initial state is not a failure:\n"
+          f"{text}")
+    print("prove OK: an obligation Z3 gives up on is not proven")
+
+
+COUNTER = {  # SKILL.md's counter: ticks every 1.0, adds what arrives
+    "x": {"add": "int"}, "y": {"out": "int"},
+    "s": {"count": "int", "sigma": "double"},
+    "delta_int": {"otherwise": {"count": "count + 1", "sigma": "1.0"}},
+    "delta_ext": {
+        "add.bagSize() != 0": {"count": "count + add.bag(-1)",
+                               "sigma": "sigma - e"},
+        "otherwise": {"sigma": "sigma - e"}},
+    "delta_con": {
+        "add.bagSize() != 0": {"count": "count + 1 + add.bag(-1)",
+                               "sigma": "1.0"},
+        "otherwise": {"count": "count + 1", "sigma": "1.0"}},
+    "lambda": {"otherwise": {"out": "count"}},
+    "ta": {"otherwise": "sigma"},
+}
+
+
+def fused_counter(first):
+    """The counter with input ports a and b; when both have messages it adds
+    the last one of `first`."""
+    ports = [first, "b" if first == "a" else "a"]
+
+    def by_port(assign):
+        return {**{f"{p}.bagSize() != 0": assign(f"{p}.bag(-1)")
+                   for p in ports}, "otherwise": assign(None)}
+
+    return {**COUNTER, "x": {"a": "int", "b": "int"},
+            "delta_ext": by_port(lambda last: {
+                **({"count": f"count + {last}"} if last else {}),
+                "sigma": "sigma - e"}),
+            "delta_con": by_port(lambda last: {
+                "count": f"count + 1 + {last}" if last else "count + 1",
+                "sigma": "1.0"})}
+
+
+def check_prove_open(folder):
+    """An open model whose ports a and b both feed one input port: its bag
+    holds a's messages, then b's (eic order), under external and confluent
+    events; a fusion with the default delta_con; the model nested one level
+    down."""
+    start = {"count": "0", "sigma": "1.0"}
+    write_model(folder, "counter", COUNTER, start)
+
+    def wrapper(name, model, cid, port_to, init):
+        """A coupled model with ports a and b into cid, cid's out out."""
+        return write_model(folder, name, {
+            "x": {"a": "int", "b": "int"}, "y": {"out": "int"},
+            "components": {model: cid}, "ic": [],
+            "eic": [{"port_from": p, "component_to": cid,
+                     "port_to": port_to[p]} for p in "ab"],
+            "eoc": [{"component_from": cid, "port_from": "out",
+                     "port_to": "out"}]}, init, kind="coupled")
+
+    coupled = wrapper("counting", "counter", "C", {"a": "add", "b": "add"},
+                      {"C": start})
+    nested = wrapper("nest", "counting", "W", {"a": "a", "b": "b"},
+                     {"W": {"C": start}})
+
+    def fusion(body, of=coupled, count="C.count"):
+        sub = tempfile.mkdtemp(dir=folder)
+        fused = write_model(sub, "fused_counting", body, start)
+        devsmap.write_json(os.path.join(sub, "fused_counting_mapping.json"), {
+            "mapping": {"fused_counting": {"count": count, "sigma": "ta"}}})
+        return proving(of, fused)
+
+    report, text = fusion(fused_counter("b"))
+    check(report.proven and "delta_ext on external events, F branch "
+          "'otherwise'" in report.vacuous,
+          f"prove: the open counter is not proven, or its delta_ext "
+          f"otherwise (no input) is not vacuous:\n{text}")
+    report, text = fusion(fused_counter("a"))
+    failed = sorted({name.split(" on ")[0] for name in report.failed})
+    check(failed == ["delta_con", "delta_ext"],
+          f"prove: adding a's message instead of b's fails {failed}:\n{text}")
+    report, text = fusion({**fused_counter("b"),
+                           "delta_con": {"otherwise": {}}})
+    check(report.proven and "(delta_int, then delta_ext)" in text,
+          f"prove: the counter with the default delta_con is not "
+          f"proven:\n{text}")
+    report, text = fusion(fused_counter("b"), nested, "W.C.count")
+    check(report.proven, f"prove: the nested counter is not proven:\n{text}")
+    print("prove OK: an open model, its two eics into one port in bag "
+          "order, external and confluent events, a vacuous branch; the "
+          "default delta_con; the model nested one level down")
+
+
 def selftest():
     check_fuse_verifier()
 
 
 def run_checks():
     check_flatten()
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        check_bag_order(tmp)
     check_coupled_trace()
     for run in (check_arithmetic, check_message_list,
                 check_simultaneous_assignments, check_stray_files):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             run(tmp)
     check_fuse_verifier()
-    for run in (check_reference_window, check_fuse_loop):
+    for run in (check_reference_window, check_fuse_loop,
+                check_prove_pingpong, check_prove_open, check_encoding):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             run(tmp)
+    check_prove_unknown()

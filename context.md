@@ -18,17 +18,21 @@ closely as possible.
 
 | Module | Job |
 |---|---|
-| `devsmap.py` | Loads a model, its component models and initial states (no validation; an unreadable file is a `ValueError` naming it). `write_json` is the one JSON writer. |
-| `devsmap_flatten.py` | Dissolves nesting into leaf atomics and leaf-to-leaf couplings; writes the text summary the LLM gets. Exact, no AI. |
+| `devsmap.py` | Loads a model, its component models and initial states (no validation; an unreadable file is a `ValueError` naming it); finds its definitions and parameter files. `write_json` is the one JSON writer. |
+| `devsmap_flatten.py` | Dissolves nesting into leaf atomics and leaf-to-leaf couplings, with each input port's sources in Cadmium's bag order; writes the text summary the LLM gets. Exact, no AI. |
 | `cadmium_api.py` | `simulate(path, end_time)`: stages the model for the DEVSMap generator, compiles the generated `main.cpp` against Cadmium, runs it and parses the CSVLogger trace (`logfile.csv`). `check(path)` only generates and compiles. Failures are `CadmiumError` with that step's output. |
 | `fuse.py` | Reference run, prompt, LLM call, verify loop. |
+| `devsmap_expr.py` | Parses one DEVSMap expression into a syntax tree. |
+| `devsmap_z3.py` | Encodes DEVSMap domains, expressions and atomic models in Z3. |
+| `prove.py` | Proves a fused atomic equivalent to its coupled model (see "Proving a fusion"). |
 | `main.py` | Command line. |
 | `verify.py` | Check suite; the LLM is replaced by canned replies. |
 
-Nothing validates models. A bad user model or LLM proposal fails in the
-generator, g++ or the simulation, and for a proposal that error goes back
-to the LLM like a trace mismatch. The trace comparison (open models: the
-compile) is the check.
+Fusing validates no model up front. A bad user model or LLM proposal
+fails in the generator, g++ or the simulation, and for a proposal that
+error goes back to the LLM like a trace mismatch. The trace comparison
+(open models: the compile) is the check. Only the prover refuses some
+models outright (see "Proving a fusion").
 
 The LLM gets the raw DEVSMap files, the flattened summary,
 `devsmap/SKILL.md` (the atomic-model rules) and the start of the
@@ -78,6 +82,107 @@ never simulated. Pass the model's own C++ headers with `--header` and
 can point at a small header of named functions that includes the model's
 own headers (e.g. `devsmap/<model>_functions.hpp`).
 
+## Proving a fusion
+
+`python main.py <coupled>.json --prove <fused>_atomic.json` proves with Z3
+that the fused atomic F behaves exactly like the coupled model's resultant
+R (its closure under coupling, as Cadmium runs it), for every state,
+input and parameter value, not only on a simulated trace. It needs a
+system homomorphism (Zeigler, Theory of Modeling and Simulation) in
+`<fused>_mapping.json` next to F, written by hand (or by the LLM):
+
+    {"mapping": {"<fused>": {"<F state variable>": <expression, or
+                             {"<condition>": <expression or map>, ...,
+                              "otherwise": <expression or map>}>}},
+     "invariant": ["<condition>", ...],
+     "functions": {"<function>": "<result domain>", ...}}
+
+Mapping expressions and invariant conditions are DEVSMap over R's state:
+`<component id>.<variable>` (and `.field`; nested ids are paths,
+`P.L.phase`), `<component id>.e` (time since its last transition),
+parameters, and `ta` (R's time advance). A condition map of values may
+nest; each level ends with `"otherwise"`. The invariant describes R's
+reachable states; `0 <= e <= ta` in every component is added to it.
+`functions` (optional) gives the result domains of the functions the
+models call.
+
+One Z3 query per obligation (unsat is proven; sat or unknown is not),
+split per kind of event and per F branch:
+
+- init: the invariant holds in R's initial state; h maps it to F's.
+- the invariant is kept by internal, external and confluent events.
+- `ta_F(h(s)) = ta_R(s)`; lambda_F(h(s)) is R's output.
+- `delta_F(h(s), ...) = h(delta_R(s, ...))` for each kind of event.
+
+R's events: internal at `t = ta_R`, external at `0 <= t < ta_R` with some
+input, confluent at `t = ta_R` with some input. Imminent components (ta -
+e = t) output; outputs travel through the couplings into input bags in
+Cadmium's order (`flatten`'s `bags`: per level, ic sources in ic order,
+then eic ones); imminent and receiving components take delta_con,
+imminent ones delta_int, receiving ones delta_ext with their own e + t.
+R's output is what its eoc sends, in eoc order; a model without ports
+outputs every component's messages as `"<id>:<value>"`, compared as a
+multiset, as fuse does.
+
+A failed obligation prints a counterexample: each component's state, h
+of it, the event (time, inputs, imminent components) and what differs.
+A proven obligation whose premise the invariant rules out is marked
+vacuous (e.g. an F branch no reachable state takes). `--prune` first
+drops invariant conditions not proven initially or not kept relative to
+the others (Houdini) and lists them. Exit 0 means PROVEN.
+
+The encoding (`devsmap_z3`) follows the generator: if/else-if condition
+maps (no true key: nothing happens), simultaneous assignments, the
+default delta_con (delta_int, then delta_ext with e = 0), `ta` only as
+`{"otherwise": "<state variable>"}`, C++ integer `/` and `%`, `"text" +
+x` as the text of each operand. Domains:
+
+- integer: unbounded integers. unsigned_integer: 32-bit words (`size_t`
+  64) that wrap around as in C++ (`u - 1` at 0 is 4294967295, `u < 0`
+  never holds; an int operand converts to unsigned).
+- floating_point: the reals plus -0.0, inf, -inf and NaN. Zeros keep
+  IEEE's signs (`1.0 / -0.0` is -inf, `-0.0 == 0.0`). NaN keeps its sign
+  (`nan`, `-nan`); every comparison with it is false except `!=`,
+  arithmetic passes a NaN operand on, and an invalid operation (inf - inf,
+  0 * inf, 0 / 0) gives -nan, as on x86. It is a Z3 datatype over Reals,
+  not Z3's FPSort: exact real arithmetic keeps the queries solvable.
+  Bit-precise doubles would still not match Cadmium, which rounds
+  absolute times (`timeNext = timeLast + ta`, `e = time - timeLast`),
+  while R's state holds only each component's e.
+- string, boolean; a struct set of the definitions files is a datatype
+  (`set(...)`, `.field`). A set of one field also converts to and from
+  that field's value, as a C++ alias of the field's type would. Arrays
+  and input bags are sequences (`bagSize()`, `bag(i)` with a
+  Python-style index).
+- A function the models call is uninterpreted; it returns its domain
+  under `functions`, else a floating_point, and then a `/` or `%` that C++
+  might do on integers through it is refused. The text of a number is
+  uninterpreted too.
+
+Refused outright: an integer literal with a leading zero (octal in C++),
+and a state variable or port named `e`, `inf`, `nan`, `true` or `false`.
+Parameter values come from `<coupled>_param.json` (one value per name),
+else any value.
+
+PROVEN assumes:
+
+- exact arithmetic: real numbers, not IEEE doubles; signed integers
+  without overflow. This also decides which events happen at the same
+  time.
+- functions and the text of numbers are pure: the same arguments give
+  the same value at every call and in both models, and nothing else is
+  known about them; an undeclared function returns a floating_point. A
+  call without arguments is warned about.
+- what C++ leaves undefined (a bag read out of range, an integer
+  division by zero, inf or NaN converted to an integer) gives some value,
+  the same for the same operands.
+- the parameter values are the constants the C++ is compiled with.
+- the generator and Cadmium run the models as encoded.
+- values of a set of one field stay within the field's min and max where
+  they are narrower than its domain (listed only when a model uses such
+  a set): the encoding uses the full domain, the C++ type may be
+  narrower (`uint8_t`).
+
 ## Cadmium backend
 
 - Generator: github.com/HazelGriffith/DEVSMap_to_Cadmium_Generator,
@@ -108,14 +213,16 @@ prompt. The rest:
   hierarchical form (`{"init_states": {"<top>": {"<id>": {"<var>":
   "<value>"}}}}`). Atomic files carry no `initial`, so a fused model is
   two files.
-- The paper's `_experiment`, `_param`, `_metadata` and `_definitions`
-  files and top-level `include_sets` and `parameters` keys are not used;
+- The `_definitions` files a model's `include_sets` lists and the
+  `<coupled>_param.json` parameter values go into the prompt and the
+  prover. The paper's `_experiment` and `_metadata` files are not used;
   `cadmium_api` writes the experiment file per run.
 
 ## Setup
 
 ```
 git submodule update --init      # not --recursive
+pip install z3-solver            # the prover; --check needs it too
 pip install -U google-genai      # or openai; only to call the LLM
 cp .env.example .env             # then set the API key
 python main.py --check           # needs g++, no API key
@@ -130,6 +237,9 @@ MinGW-w64 from MSYS2) and Python >= 3.10.
     python main.py <name>_coupled.json   # fuse, e.g. devsmap/pingpong_coupled.json
     python main.py <name>_coupled.json --header C:/path/to/repo/include/model.hpp -I C:/path/to/repo/include
                                          # fuse against a repo's C++ headers
+    python main.py <name>_coupled.json --prove <fused>_atomic.json [--prune]
+                                         # prove a fusion equivalent, with
+                                         # <fused>_mapping.json next to it
     python main.py --check               # full check suite
     python main.py --selftest            # only the fuse verifier check
 
@@ -139,8 +249,9 @@ MinGW-w64 from MSYS2) and Python >= 3.10.
 
 | Exit | When |
 |---|---|
-| 0 | checks passed, or fuse accepted a proposal |
+| 0 | checks passed, fuse accepted a proposal, or --prove proved it |
 | 1 | no proposal accepted in `FUSE_MAX_ITERS` rounds, or the LLM call failed (the log says why) |
+| 1 | --prove: some obligation not proven (the log has its counterexample) |
 | 1 | any other error: one `error: ...` line on stderr |
 | 2 | bad usage |
 
@@ -170,7 +281,8 @@ to `build/`. Both are gitignored.
 
 - `devsmap/`: ping-pong (`player_atomic`, `pingpong_coupled`,
   `pingpong_init_state`) and `SKILL.md`
-- `fixtures/`: `fused_pingpong_*`, a hand fusion the checks expect to pass
+- `fixtures/`: `fused_pingpong_*`, a hand fusion the checks expect to pass,
+  with the mapping that proves it
 - `cadmium_v2/`, `third_party/devsmap_generator/`: submodules
 - `.env.example`: template for `.env`
 
@@ -233,9 +345,9 @@ output.
 
 - **Float tolerance**: real-valued outputs need a per-instant comparison
   with a tolerance instead of exact values.
-- **State mapping**: the log already has state rows. Have the LLM state a
-  map from fused state to the components' states and check it at every
-  event time; this catches outputs that agree by luck within the horizon.
+- **State mapping**: done symbolically by `--prove` (see "Proving a
+  fusion"), given a hand-written mapping and invariant. Next: have the
+  LLM state them with its fusion and prove each proposal.
 - **Second simulator** (e.g. adevs): the only check against bugs shared by
   both runs. Needs a second DEVSMap translator; not planned until one
   exists.
