@@ -1,10 +1,11 @@
 """Load DEVSMap model trees and provide JSON helpers.
 
 `load_model` includes referenced component models and initial states;
-`models` lists the models of a loaded tree, each file once; `model_files`,
-`definition_files` and `param_path` locate the files a model uses and
-`read_params` reads its parameter values; `model_name` extracts the model
-key; `read_json` and `write_json` read and write a document.
+`models` lists the models of a loaded tree, each file once, and `leaves`
+its atomic instances by leaf path; `model_files`, `definition_files` and
+`param_path` locate the files a model uses and `read_params` reads its
+parameter values; `model_name` extracts the model key; `read_json` and
+`write_json` read and write a document.
 """
 
 import contextlib
@@ -108,6 +109,24 @@ def models(model):
     return list(found.values())
 
 
+def leaves(model):
+    """{leaf path: (component ids, atomic model)} of every atomic instance
+    in the tree, in component order. The path is the ids from the top
+    model down, joined by "."; an atomic model is its own leaf, with no
+    ids and its name as its path."""
+    found = {}
+
+    def walk(m, ids):
+        if m["kind"] == "atomic":
+            found[".".join(ids) or model["name"]] = (ids, m)
+            return
+        for c in m["components"]:
+            walk(m["models"][c["model"]], (*ids, c["id"]))
+
+    walk(model, ())
+    return found
+
+
 def model_files(model):
     """Paths of the model's file and every component model file below it."""
     return [m["path"] for m in models(model)]
@@ -152,18 +171,10 @@ def _per_leaf(model, doc, default=None):
     """{leaf path: node} of a document in the paper's hierarchical form
     ({"<top>": {"<id>": {"<sub id>": ...}}}); a component missing from it is
     an error, or gets `default` if one is given."""
-    leaves = {}
-
-    def walk(m, node, path):
-        if m["kind"] == "atomic":
-            leaves[path] = node
-            return
-        for c in m["components"]:
-            child = (node[c["id"]] if default is None
-                     else node.get(c["id"], default))
-            walk(m["models"][c["model"]], child,
-                 f"{path}.{c['id']}" if path else c["id"])
-
-    walk(model, doc[model["name"]],
-         model["name"] if model["kind"] == "atomic" else "")
-    return leaves
+    top, found = doc[model["name"]], {}
+    for path, (ids, _) in leaves(model).items():
+        node = top
+        for cid in ids:
+            node = node[cid] if default is None else node.get(cid, default)
+        found[path] = node
+    return found

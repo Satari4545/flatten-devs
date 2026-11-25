@@ -27,31 +27,28 @@ def flatten(model):
     at each level, the ic sources in ic order, then the eic ones in eic
     order.
     """
-    components = {}
-    feeds = {}  # (component path, in port) -> [(source path, port)]
-    root = model["name"] if model["kind"] == "atomic" else ""
+    leaves = devsmap.leaves(model)
+    paths = {ids: leaf for leaf, (ids, _) in leaves.items()}
+    components = {leaf: {"model": m["name"], "x": m["body"].get("x", {}),
+                         "y": m["body"].get("y", {}),
+                         "initial": model["init"][leaf]}
+                  for leaf, (_, m) in leaves.items()}
+    feeds = {}  # (instance ids, in port) -> [(source ids, port)]
 
-    # Returns output port -> [(leaf_id, leaf_port)], in bag order.
-    def walk(m, path):
+    # Returns output port -> [(leaf ids, leaf port)], in bag order.
+    def walk(m, ids):
         body = m["body"]
         if m["kind"] == "atomic":
-            components[path] = {"model": m["name"], "x": body.get("x", {}),
-                                "y": body.get("y", {}),
-                                "initial": model["init"][path]}
-            return {p: [(path, p)] for p in body.get("y", {})}
-
-        def child(cid):
-            return f"{path}.{cid}" if path else cid
-
-        outs = {c["id"]: walk(m["models"][c["model"]], child(c["id"]))
+            return {p: [(ids, p)] for p in body.get("y", {})}
+        outs = {c["id"]: walk(m["models"][c["model"]], (*ids, c["id"]))
                 for c in m["components"]}
         # Cadmium propagates ics while collecting outputs, eics afterwards.
         for c in body.get("ic", []):
-            feeds.setdefault((child(c["component_to"]), c["port_to"]), []) \
+            feeds.setdefault(((*ids, c["component_to"]), c["port_to"]), []) \
                 .extend(outs[c["component_from"]][c["port_from"]])
         for c in body.get("eic", []):
-            feeds.setdefault((child(c["component_to"]), c["port_to"]), []) \
-                .append((path, c["port_from"]))
+            feeds.setdefault(((*ids, c["component_to"]), c["port_to"]), []) \
+                .append((ids, c["port_from"]))
         ys = {p: [] for p in body.get("y", {})}
         for c in body.get("eoc", []):
             ys[c["port_to"]] += outs[c["component_from"]][c["port_from"]]
@@ -60,27 +57,28 @@ def flatten(model):
     def sources(dst, port):
         found = []
         for src, p in feeds.get((dst, port), []):
-            if src == root:
+            if src == ():  # the top model's own input port
                 found.append((None, p))
-            elif src in components:
-                found.append((src, p))
+            elif src in paths:
+                found.append((paths[src], p))
             else:
                 found += sources(src, p)
         return found
 
-    outs = walk(model, root)
+    outs = walk(model, ())
     if model["kind"] == "atomic":  # its input ports are the model's own
         x = model["body"].get("x", {})
-        feeds.update({(root, p): [(root, p)] for p in x})
-    bags = {(leaf, p): sources(leaf, p)
-            for leaf, c in components.items() for p in c["x"]}
+        feeds.update({((), p): [((), p)] for p in x})
+    bags = {(leaf, p): sources(ids, p) for leaf, (ids, _) in leaves.items()
+            for p in components[leaf]["x"]}
     edges = [(s, sp, d, dp) for (d, dp), srcs in bags.items()
              for s, sp in srcs]
     return {
         "components": components,
         "couplings": sorted(e for e in edges if e[0] is not None),
         "inputs": sorted((sp, d, dp) for s, sp, d, dp in edges if s is None),
-        "outputs": [(*s, p) for p, ss in outs.items() for s in ss],
+        "outputs": [(paths[ids], sp, p) for p, ss in outs.items()
+                    for ids, sp in ss],
         "bags": bags,
     }
 

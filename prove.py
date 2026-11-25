@@ -89,6 +89,8 @@ class Resultant:
         self.enc = enc
         self.parts = {cid: Atomic(enc, c["model"], bodies[c["model"]])
                       for cid, c in flat["components"].items()}
+        self.ids = {cid: ids for cid, (ids, _)
+                    in devsmap.leaves(model).items()}
         self.initials = {cid: c["initial"]
                          for cid, c in flat["components"].items()}
         self.bags, self.eoc = flat["bags"], flat["outputs"]
@@ -191,7 +193,7 @@ class Resultant:
             return out
         out = {}
         for cid, ports in sent.items():
-            tag = z3.StringVal(cid.rsplit(".", 1)[-1] + ":")
+            tag = z3.StringVal(self.ids[cid][-1] + ":")
             for p, slots in ports.items():
                 out.setdefault(p, []).extend(
                     (g, z3.Concat(tag, self._logged(m))) for g, m in slots)
@@ -230,7 +232,7 @@ class Mapping:
     def scope(self, s):
         names = dict(self.enc.params)
         for cid, values in s.vars.items():
-            *outer, last = cid.split(".")
+            *outer, last = self.resultant.ids[cid]
             node = names
             for part in outer:
                 node = node.setdefault(part, {})

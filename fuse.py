@@ -355,13 +355,10 @@ def reference_run(path):
 def _model_size(model):
     """(state variables, delta_int + delta_ext + lambda branches), summed
     over every atomic instance in a load_model result."""
-    if model["kind"] == "atomic":
-        body = model["body"]
-        return len(body["s"]), sum(
-            len(body[f]) for f in ("delta_int", "delta_ext", "lambda"))
-    sizes = [_model_size(model["models"][c["model"]])
-             for c in model["components"]]
-    return sum(s for s, _ in sizes), sum(b for _, b in sizes)
+    bodies = [m["body"] for _, m in devsmap.leaves(model).values()]
+    return (sum(len(body["s"]) for body in bodies),
+            sum(len(body[f]) for body in bodies
+                for f in ("delta_int", "delta_ext", "lambda")))
 
 
 def _raw_file(path):
