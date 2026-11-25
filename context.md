@@ -28,10 +28,11 @@ closely as possible.
 | `main.py` | Command line. |
 | `verify.py` | Check suite; the LLM is replaced by canned replies. |
 
-Nothing validates models. A bad user model or LLM proposal fails in the
-generator, g++ or the simulation, and for a proposal that error goes back
-to the LLM like a trace mismatch. The trace comparison (open models: the
-compile) is the check.
+Fusing validates no model up front. A bad user model or LLM proposal
+fails in the generator, g++ or the simulation, and for a proposal that
+error goes back to the LLM like a trace mismatch. The trace comparison
+(open models: the compile) is the check. Only the prover refuses some
+models outright (see "Proving a fusion").
 
 The LLM gets the raw DEVSMap files, the flattened summary,
 `devsmap/SKILL.md` (the atomic-model rules) and the start of the
@@ -143,7 +144,11 @@ x` as the text of each operand. Domains:
   IEEE's signs (`1.0 / -0.0` is -inf, `-0.0 == 0.0`). NaN keeps its sign
   (`nan`, `-nan`); every comparison with it is false except `!=`,
   arithmetic passes a NaN operand on, and an invalid operation (inf - inf,
-  0 * inf, 0 / 0) gives -nan, as on x86.
+  0 * inf, 0 / 0) gives -nan, as on x86. It is a Z3 datatype over Reals,
+  not Z3's FPSort: exact real arithmetic keeps the queries solvable.
+  Bit-precise doubles would still not match Cadmium, which rounds
+  absolute times (`timeNext = timeLast + ta`, `e = time - timeLast`),
+  while R's state holds only each component's e.
 - string, boolean; a struct set of the definitions files is a datatype
   (`set(...)`, `.field`). A set of one field also converts to and from
   that field's value, as a C++ alias of the field's type would. Arrays

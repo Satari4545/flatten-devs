@@ -1,9 +1,10 @@
 """Load DEVSMap model trees and provide JSON helpers.
 
 `load_model` includes referenced component models and initial states;
-`model_files`, `definition_files` and `param_path` locate the files a model
-uses and `read_params` reads its parameter values; `model_name` extracts the
-model key; `read_json` and `write_json` read and write a document.
+`models` lists the models of a loaded tree, each file once; `model_files`,
+`definition_files` and `param_path` locate the files a model uses and
+`read_params` reads its parameter values; `model_name` extracts the model
+key; `read_json` and `write_json` read and write a document.
 """
 
 import contextlib
