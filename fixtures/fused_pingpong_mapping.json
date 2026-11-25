@@ -1,8 +1,8 @@
 {
   "mapping": {
     "fused_pingpong": {
-      "A": {"A.phase == \"Send\"": "\"Ball\"", "otherwise": "\"NoBall\""},
-      "B": {"B.phase == \"Send\"": "\"Ball\"", "otherwise": "\"NoBall\""},
+      "A": "A.phase",
+      "B": "B.phase",
       "sigma": "ta"
     }
   },

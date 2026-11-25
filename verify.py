@@ -386,12 +386,12 @@ def check_prove_pingpong(folder):
         body["lambda"]["otherwise"]["send"] = "\"A:ball\""
 
     def ball_stays(body):
-        body["delta_int"]["otherwise"]["B"] = "\"Ball\""
+        body["delta_int"]["otherwise"]["B"] = "\"Send\""
 
     for change, expected in [
             (wrong_sender, 'output on send: expected ["B:ball"], '
                            'got ["A:ball"]'),
-            (ball_stays, 'fused B: expected "NoBall", got "Ball"')]:
+            (ball_stays, 'fused B: expected "Wait", got "Send"')]:
         report, text = proving(COUPLED,
                                hand_fusion_variant(folder, change))
         check(not report.proven and expected in text,
