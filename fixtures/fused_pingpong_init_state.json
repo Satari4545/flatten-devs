@@ -1,8 +1,8 @@
 {
   "init_states": {
     "fused_pingpong": {
-      "A": "\"Ball\"",
-      "B": "\"NoBall\"",
+      "A": "\"Send\"",
+      "B": "\"Wait\"",
       "sigma": "0.1"
     }
   }
