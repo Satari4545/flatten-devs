@@ -6,7 +6,7 @@
     show(value)                    a concrete value (from a model) as text
     duration, time_left, earliest, at, before, by
                                    times, as floating_point values
-    all_of, any_of, not_, ite      Boolean and if-then-else builders
+    all_of, any_of, ite            Boolean and if-then-else builders
     concat(parts, sort)            sequences one after the other
     within(where, run, *args)      run, naming `where` in its ValueError
 
@@ -74,15 +74,15 @@ def any_of(*cs):
     return z3.Or(cs) if len(cs) > 1 else cs[0] if cs else FALSE
 
 
-def not_(c):
+def _not(c):
     return FALSE if z3.is_true(c) else TRUE if z3.is_false(c) else z3.Not(c)
 
 
 def _xor(p, q):
     if z3.is_true(p) or z3.is_false(p):
-        return not_(q) if z3.is_true(p) else q
+        return _not(q) if z3.is_true(p) else q
     if z3.is_true(q) or z3.is_false(q):
-        return not_(p) if z3.is_true(q) else p
+        return _not(p) if z3.is_true(q) else p
     return z3.Xor(p, q)
 
 
@@ -165,7 +165,7 @@ def _make(x, negative):
 
 def _f_neg(a):
     return ite(_finite(a), _make(_real_op("-", _ZERO, _real(a)),
-                                 not_(_signbit(a))),
+                                 _not(_signbit(a))),
                ite(_is("pinf", a), NINF,
                    ite(_is("ninf", a), INF,
                        FLOAT.nan(z3.Not(FLOAT.negative(a))))))
@@ -181,7 +181,7 @@ def _exact(op, a, b):
                        ite(sign, NINF, INF)),
                    _make(_real_op("/", x, y), sign))
     negative = {"*": sign, "+": all_of(_signbit(a), _signbit(b)),
-                "-": all_of(_signbit(a), not_(_signbit(b)))}[op]
+                "-": all_of(_signbit(a), _not(_signbit(b)))}[op]
     return _make(_real_op(op, x, y), negative)
 
 
@@ -215,10 +215,10 @@ def _f_lt(a, b):
     both = all_of(_finite(a), _finite(b))
     if z3.is_true(both):
         return _real_op("<", _real(a), _real(b))
-    return all_of(not_(_is("nan", a)), not_(_is("nan", b)),
+    return all_of(_not(_is("nan", a)), _not(_is("nan", b)),
                   ite(both, _real_op("<", _real(a), _real(b)),
-                      any_of(all_of(_is("ninf", a), not_(_is("ninf", b))),
-                             all_of(not_(_is("pinf", a)), _is("pinf", b)))))
+                      any_of(all_of(_is("ninf", a), _not(_is("ninf", b))),
+                             all_of(_not(_is("pinf", a)), _is("pinf", b)))))
 
 
 def _f_eq(a, b):
@@ -226,7 +226,7 @@ def _f_eq(a, b):
     both = all_of(_finite(a), _finite(b))
     if z3.is_true(both):
         return _real_op("==", _real(a), _real(b))
-    return all_of(not_(_is("nan", a)), not_(_is("nan", b)),
+    return all_of(_not(_is("nan", a)), _not(_is("nan", b)),
                   ite(both, _real_op("==", _real(a), _real(b)), a == b))
 
 
@@ -274,7 +274,7 @@ def _float_op(op, a, b):
     if op in ("<=", ">="):
         return _f_le(a, b) if op == "<=" else _f_le(b, a)
     if op in ("==", "!="):
-        return _f_eq(a, b) if op == "==" else not_(_f_eq(a, b))
+        return _f_eq(a, b) if op == "==" else _not(_f_eq(a, b))
     if op == "%":
         raise ValueError("% of floating_point values")
     return _f_arith(op, a, b)
@@ -322,7 +322,7 @@ def _number(text):
     return z3.IntVal(int(text))
 
 
-class Bag:
+class _Bag:
     """An input port's bag: a Z3 sequence of its messages, in order."""
 
     def __init__(self, seq):
@@ -330,8 +330,8 @@ class Bag:
 
 
 def _plain(v):
-    """v, if it is a value (not a Bag or a dict of names)."""
-    if isinstance(v, Bag):
+    """v, if it is a value (not a _Bag or a dict of names)."""
+    if isinstance(v, _Bag):
         raise ValueError("an input port is read only through bagSize() and "
                          "bag(i)")
     if isinstance(v, dict):
@@ -339,13 +339,13 @@ def _plain(v):
     return v
 
 
-def sort_name(sort):
+def _sort_name(sort):
     if sort == FLOAT:
         return "floating_point"
     if _unsigned(sort):
         return f"{sort.size()}-bit unsigned integer"
     if isinstance(sort, z3.SeqSortRef) and not sort == STRING:
-        return f"array of {sort_name(sort.basis())}"
+        return f"array of {_sort_name(sort.basis())}"
     return {INT: "integer", BOOL: "boolean", STRING: "string"}.get(
         sort, sort.name())
 
@@ -354,7 +354,7 @@ class Encoding:
     """Z3 sorts for DEVSMap domains, and the values of expressions.
 
     `params` maps parameter names to their values; a scope (a dict) maps
-    the other names an expression may use to a Z3 value, a Bag, or a dict
+    the other names an expression may use to a Z3 value, a _Bag, or a dict
     of further names (`a.b` looks b up in a).
     """
 
@@ -473,7 +473,7 @@ class Encoding:
         if have == BOOL and _numeric(sort):
             return self.convert(z3.If(v, z3.IntVal(1), z3.IntVal(0)), sort)
         if sort == BOOL and _numeric(have):
-            return not_(_f_eq(v, _fin(0))) if have == FLOAT else v != 0
+            return _not(_f_eq(v, _fin(0))) if have == FLOAT else v != 0
         if sort == FLOAT and have != FLOAT and _numeric(have):
             return _fin(z3.ToReal(v if have == INT else z3.BV2Int(v)))
         if sort == INT and have == FLOAT:
@@ -493,7 +493,7 @@ class Encoding:
                 return z3.BitVecVal(x.as_long() % 2 ** sort.size(),
                                     sort.size())
             return z3.Int2BV(x, sort.size())
-        raise ValueError(f"a {sort_name(have)} where a {sort_name(sort)} is "
+        raise ValueError(f"a {_sort_name(have)} where a {_sort_name(sort)} is "
                          f"expected")
 
     def function(self, name, sorts, result):
@@ -564,14 +564,14 @@ class Encoding:
             if field not in v:
                 raise ValueError(f"unknown name {field!r} after '.'")
             return v[field]
-        fields = None if isinstance(v, Bag) else self.fields(v.sort())
+        fields = None if isinstance(v, _Bag) else self.fields(v.sort())
         if fields is None or field not in fields:
             raise ValueError(f".{field} of a value without that field")
         return self._structs[v.sort().name()].accessor(
             0, fields.index(field))(v)
 
     def _bag_op(self, bag, method, args, scope):
-        if not isinstance(bag, Bag):
+        if not isinstance(bag, _Bag):
             raise ValueError(f".{method}() of something not an input port")
         size = z3.Length(bag.seq)
         if method == "bagSize" and not args:
@@ -626,7 +626,7 @@ class Encoding:
             return z3.If(v, z3.StringVal("1"), z3.StringVal("0"))
         if _numeric(sort):
             return self.function("to_string", [sort], STRING)(v)
-        raise ValueError(f"the text of a {sort_name(sort)}")
+        raise ValueError(f"the text of a {_sort_name(sort)}")
 
     def _binary(self, op, a, b):
         a, b = self._unwrap(a), self._unwrap(b)
@@ -640,8 +640,8 @@ class Encoding:
                 return z3.Concat(a, b)
             if sorts[0] == sorts[1] and op in ("==", "!="):
                 return a == b if op == "==" else a != b
-            raise ValueError(f"{sort_name(a.sort())} {op} "
-                             f"{sort_name(b.sort())}")
+            raise ValueError(f"{_sort_name(a.sort())} {op} "
+                             f"{_sort_name(b.sort())}")
         # C++'s usual arithmetic conversions: double, else unsigned, else int
         words = [s for s in sorts if _unsigned(s)]
         sort = FLOAT if FLOAT in sorts else max(
@@ -667,7 +667,7 @@ class Encoding:
             for key, body in m.items():
                 cond = (TRUE if key == "otherwise"
                         else self.condition(key, scope))
-                taken, rest = all_of(rest, cond), all_of(rest, not_(cond))
+                taken, rest = all_of(rest, cond), all_of(rest, _not(cond))
                 if nested(body):
                     walk(body, taken, labels + [key])
                 else:
@@ -732,7 +732,7 @@ class Atomic:
     def scope(self, state, e=None, bags=None):
         names = {**self.enc.params, **state}
         if bags is not None:
-            names.update({p: Bag(bags.get(p, z3.Empty(z3.SeqSort(sort))))
+            names.update({p: _Bag(bags.get(p, z3.Empty(z3.SeqSort(sort))))
                           for p, sort in self.x.items()})
         if e is not None:
             names["e"] = e
