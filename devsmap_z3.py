@@ -7,6 +7,7 @@
     duration, time_left, earliest, at, before, by
                                    times, as floating_point values
     all_of, any_of, not_, ite      Boolean and if-then-else builders
+    concat(parts, sort)            sequences one after the other
     within(where, run, *args)      run, naming `where` in its ValueError
 
 context.md, "Proving a fusion", describes how each domain and operator is
@@ -90,6 +91,13 @@ def ite(c, a, b):
     if z3.is_true(c) or a.eq(b):
         return a
     return b if z3.is_false(c) else z3.If(c, a, b)
+
+
+def concat(parts, sort):
+    """The sequences `parts` of elements of `sort`, one after the other."""
+    if len(parts) > 1:
+        return z3.Concat(parts)
+    return parts[0] if parts else z3.Empty(z3.SeqSort(sort))
 
 
 def _kind(a):
@@ -599,10 +607,8 @@ class Encoding:
                                  "is unknown")
             sorts = [self.eval(item, scope).sort() for item in items]
             element = FLOAT if FLOAT in sorts else sorts[0]
-        units = [z3.Unit(self.value(item, element, scope)) for item in items]
-        if not units:
-            return z3.Empty(z3.SeqSort(element))
-        return z3.Concat(units) if len(units) > 1 else units[0]
+        return concat([z3.Unit(self.value(item, element, scope))
+                       for item in items], element)
 
     def _negate(self, v):
         sort = _plain(v).sort()

@@ -18,7 +18,7 @@ import z3
 import devsmap
 import devsmap_flatten
 from devsmap_z3 import (FALSE, STRING, Atomic, Encoding, all_of, any_of, at,
-                        before, by, duration, earliest, ite, show,
+                        before, by, concat, duration, earliest, ite, show,
                         time_left, within)
 
 QUERY_TIMEOUT = 600  # seconds per Z3 query
@@ -66,17 +66,10 @@ class Event(NamedTuple):
     inputs: dict    # coupled input port -> sequence
 
 
-def _concat(parts, sort):
-    """The sequences `parts` of elements of `sort`, one after the other."""
-    if len(parts) > 1:
-        return z3.Concat(parts)
-    return parts[0] if parts else z3.Empty(z3.SeqSort(sort))
-
-
 def _seq(slots, sort):
     """The sequence of the messages whose guards hold, in order."""
     empty = z3.Empty(z3.SeqSort(sort))
-    return _concat([ite(g, z3.Unit(m), empty) for g, m in slots], sort)
+    return concat([ite(g, z3.Unit(m), empty) for g, m in slots], sort)
 
 
 class Resultant:
@@ -160,7 +153,7 @@ class Resultant:
                                  for g, m in sent.get(src, {}).get(port, [])]
                         parts.append(_seq(slots, sort))
                         arrived += [g for g, _ in slots]
-                bags[p] = _concat(parts, sort)
+                bags[p] = concat(parts, sort)
             after.vars[cid], after.e[cid] = self._transition(
                 a, s.vars[cid], s.e[cid] + t, imminent[cid], any_of(*arrived),
                 bags)
