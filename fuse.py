@@ -265,12 +265,12 @@ class LLMError(Exception):
 
 class Reference(NamedTuple):
     """The original model's behavior that proposals must reproduce."""
-    events: list     # observe() events up to horizon
+    events: list     # _observe() events up to horizon
     window: float    # the LLM sees the events up to this time
     horizon: float   # proposals are compared up to this time
 
 
-def shown(events, window):
+def _shown(events, window):
     """The part of observed `events` the LLM gets to see."""
     return [e for e in events if e[0] <= window]
 
@@ -279,7 +279,7 @@ def _ports(model):
     return {k: model["body"].get(k, {}) for k in ("x", "y")}
 
 
-def is_open(model):
+def _is_open(model):
     """Whether a loaded model is coupled and has ports."""
     return model["kind"] == "coupled" and any(_ports(model).values())
 
@@ -289,14 +289,14 @@ def _is_coupled(path):
 
 
 def _every_sender_twice(events, coupled):
-    """Whether every component emitting in observe() `events` emits at
+    """Whether every component emitting in _observe() `events` emits at
     least twice (an atomic model is its only sender)."""
     senders = Counter(e[2].split(":", 1)[0] if coupled else None
                       for e in events)
     return min(senders.values()) >= 2
 
 
-def observe(path, horizon):
+def _observe(path, horizon):
     """Sorted (time, port, value) events of the model at `path` up to
     t = horizon; order is not compared.
 
@@ -324,10 +324,10 @@ def reference_run(path):
     full cycle), stopping at HIDDEN_FACTOR * MAX_HORIZON."""
     name = os.path.basename(path)
     horizon = 1.0
-    events = observe(path, horizon)
+    events = _observe(path, horizon)
     while len(events) < SHOWN_EVENTS and horizon < MAX_HORIZON:
         horizon = min(10 * horizon, MAX_HORIZON)
-        events = observe(path, horizon)
+        events = _observe(path, horizon)
     if not events:
         raise ValueError(f"{name}: no output events up to t = "
                          f"{MAX_HORIZON}; nothing to fuse")
@@ -340,7 +340,7 @@ def reference_run(path):
     cap = HIDDEN_FACTOR * MAX_HORIZON
     horizon = max(round(HIDDEN_FACTOR * window, 10), MIN_HORIZON)
     while True:
-        events = observe(path, horizon)
+        events = _observe(path, horizon)
         if events[-1][0] > window and (
                 horizon >= cap or _every_sender_twice(events, coupled)):
             return Reference(events, window, horizon)
@@ -352,14 +352,14 @@ def reference_run(path):
         horizon = min(2 * horizon, cap)
 
 
-def model_size(model):
+def _model_size(model):
     """(state variables, delta_int + delta_ext + lambda branches), summed
     over every atomic instance in a load_model result."""
     if model["kind"] == "atomic":
         body = model["body"]
         return len(body["s"]), sum(
             len(body[f]) for f in ("delta_int", "delta_ext", "lambda"))
-    sizes = [model_size(model["models"][c["model"]])
+    sizes = [_model_size(model["models"][c["model"]])
              for c in model["components"]]
     return sum(s for s, _ in sizes), sum(b for _, b in sizes)
 
@@ -387,13 +387,13 @@ def definition_files(model):
     return list(dict.fromkeys(paths))
 
 
-def raw_file(path):
+def _raw_file(path):
     """A file's contents as a ```json block headed by its filename."""
     with open(path, encoding="utf-8") as f:
         return f"{os.path.basename(path)}:\n```json\n{f.read().strip()}\n```"
 
 
-def build_prompt(model, reference):
+def _build_prompt(model, reference):
     """The first prompt; `reference` is None for an open model."""
     with open(DEVSMAP_SPEC, encoding="utf-8") as f:
         spec = f.read()
@@ -406,13 +406,13 @@ def build_prompt(model, reference):
         rules = NO_TRACE_RULES
     else:
         expected = [{"time": t, "port": p, "value": v}
-                    for t, p, v in shown(reference.events, reference.window)]
+                    for t, p, v in _shown(reference.events, reference.window)]
         rules = TRACE_RULES.format(window=reference.window,
                                    expected=json.dumps(expected, indent=2))
     return PROMPT.format(
         devsmap_spec=spec,
         trace_rules=rules,
-        raw_files="\n\n".join(raw_file(p) for p in paths),
+        raw_files="\n\n".join(_raw_file(p) for p in paths),
         summary=devsmap_flatten.flattened_summary(model),
     )
 
@@ -432,7 +432,7 @@ def load_env_file():
             os.environ.setdefault(key, value)
 
 
-def env_int(name, default):
+def _env_int(name, default):
     """A positive integer from the environment; ValueError otherwise."""
     text = os.environ.get(name, str(default))
     try:
@@ -467,7 +467,7 @@ def llm_settings():
     if not models:
         raise LLMError(f"set {prefix}_MODEL to an available model ID")
     try:
-        retries = env_int(f"{prefix}_RETRIES", 3)
+        retries = _env_int(f"{prefix}_RETRIES", 3)
     except ValueError as exc:
         raise LLMError(str(exc)) from None
     return provider, key, models, retries
@@ -588,7 +588,7 @@ def _unique_keys(pairs):
     return obj
 
 
-def parse_reply(reply):
+def _parse_reply(reply):
     """(proposal text, [atomic doc, init doc] or None, why it is unusable)."""
     blocks = re.findall(r"```json[ \t]*\r?\n(.*?)```", reply,
                         re.S | re.I)
@@ -607,7 +607,7 @@ def parse_reply(reply):
     return proposal, docs, None
 
 
-def write_proposal(folder, atomic, init, definitions):
+def _write_proposal(folder, atomic, init, definitions):
     """Write a proposal to <name>_atomic.json and <name>_init_state.json in
     folder, with the `definitions` files its include_sets lists; return the
     atomic's path. ValueError if it has no usable name."""
@@ -624,14 +624,14 @@ def write_proposal(folder, atomic, init, definitions):
     return path
 
 
-def fenced(text):
+def _fenced(text):
     """A Markdown code block that backticks inside `text` cannot close."""
     longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
     fence = "`" * max(3, longest + 1)
     return f"{fence}text\n{text}\n{fence}"
 
 
-def trace_diff(got, expected, limit=3):
+def _trace_diff(got, expected, limit=3):
     """Mismatch report on observed traces: counts + first differences."""
     lines = [f"trace mismatch: got {len(got)} events, "
              f"expected {len(expected)}"]
@@ -648,23 +648,23 @@ def trace_diff(got, expected, limit=3):
 def matches_reference(path, reference):
     """(ok, reason): does the atomic at `path` match the Reference?"""
     try:
-        got = observe(path, reference.horizon)
+        got = _observe(path, reference.horizon)
     except (ValueError, cadmium_api.CadmiumError) as exc:
         return False, str(exc)
     if got == reference.events:
         return True, (f"trace matches ({len(got)} events up to "
                       f"t = {reference.horizon})")
     window = reference.window
-    if shown(got, window) != shown(reference.events, window):
-        return False, trace_diff(shown(got, window),
-                                 shown(reference.events, window))
+    if _shown(got, window) != _shown(reference.events, window):
+        return False, _trace_diff(_shown(got, window),
+                                  _shown(reference.events, window))
     # Don't leak the hidden part: the LLM only learns that it diverges.
     return False, (f"trace matches up to t = {window}, but diverges from "
                    f"the original after that window; model the behavior, "
                    f"not the listed events")
 
 
-def verify_open(path, coupled):
+def _verify_open(path, coupled):
     """(ok, reason): does the atomic at `path` keep the open `coupled`
     model's ports and compile? On success its generated <name>.hpp is
     copied next to it."""
@@ -681,12 +681,12 @@ def verify_open(path, coupled):
     return True, f"{os.path.basename(header)} compiles"
 
 
-def accept(path, original, reason, out_dir):
+def _accept(path, original, reason, out_dir):
     """Report an accepted proposal and copy its folder to a new dir in
     out_dir."""
     fused = devsmap.load_model(path)
-    states, branches = model_size(fused)
-    orig_states, orig_branches = model_size(original)
+    states, branches = _model_size(fused)
+    orig_states, orig_branches = _model_size(original)
     print(f"fuse: ACCEPTED - {reason}; {states} state variables, "
           f"{branches} branches (components: {orig_states}, "
           f"{orig_branches})")
@@ -698,7 +698,7 @@ def accept(path, original, reason, out_dir):
     shutil.copytree(os.path.dirname(path), folder, dirs_exist_ok=True)
     print(f"fuse: wrote {' + '.join(sorted(os.listdir(folder)))} to "
           f"{folder}")
-    if is_open(original):
+    if _is_open(original):
         print("fuse: the proposal was compiled but NOT simulated; verify "
               "it in the target model's own test harness")
 
@@ -712,9 +712,9 @@ def fuse(coupled_path, out_dir=OUT_DIR):
     model = devsmap.load_model(coupled_path)
     definitions = definition_files(model)
     load_env_file()
-    max_iters = env_int("FUSE_MAX_ITERS", 3)
+    max_iters = _env_int("FUSE_MAX_ITERS", 3)
     settings = llm_settings()
-    if is_open(model):
+    if _is_open(model):
         reference = None
         print(f"fuse: {model['name']} has ports, so there is no reference "
               f"run; proposals are compiled, not simulated")
@@ -722,10 +722,10 @@ def fuse(coupled_path, out_dir=OUT_DIR):
         print(f"fuse: running {model['name']} in Cadmium for the reference "
               f"trace...")
         reference = reference_run(coupled_path)
-        print(f"fuse: {len(shown(reference.events, reference.window))} "
+        print(f"fuse: {len(_shown(reference.events, reference.window))} "
               f"reference events up to t = {reference.window} shown to the "
               f"LLM; proposals are compared up to t = {reference.horizon}")
-    base = build_prompt(model, reference)
+    base = _build_prompt(model, reference)
     prompt, proposal, reason = base, None, None
 
     with tempfile.TemporaryDirectory(prefix="fuse_",
@@ -740,21 +740,22 @@ def fuse(coupled_path, out_dir=OUT_DIR):
                           f"fuse: last reason: {reason}")
                 print(f"fuse: LLM failed: {exc}")
                 return 1
-            proposal, docs, reason = parse_reply(reply)
+            proposal, docs, reason = _parse_reply(reply)
             if docs is not None:
                 try:
-                    path = write_proposal(tempfile.mkdtemp(dir=tmp), *docs,
-                                          definitions)
+                    path = _write_proposal(tempfile.mkdtemp(dir=tmp), *docs,
+                                           definitions)
                 except (ValueError, OSError) as exc:
                     reason = f"unusable proposal: {exc}"
                 else:
-                    ok, reason = (verify_open(path, model) if reference is None
-                                  else matches_reference(path, reference))
+                    ok, reason = (
+                        _verify_open(path, model) if reference is None
+                        else matches_reference(path, reference))
                     if ok:
-                        accept(path, model, reason, out_dir)
+                        _accept(path, model, reason, out_dir)
                         return 0
             print(f"fuse: REJECTED - {reason}")
-            prompt = base + FEEDBACK.format(proposal=fenced(proposal.strip()),
+            prompt = base + FEEDBACK.format(proposal=_fenced(proposal.strip()),
                                             reason=reason)
 
     print(f"fuse: no accepted model after {max_iters} attempts; "
