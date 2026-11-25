@@ -45,7 +45,7 @@ def _stage(model, end_time, stage):
     os.makedirs(os.path.join(stage, "output", "main", "include"))
     # The generator takes the first key as the model name and reads with the
     # platform encoding, so files are rewritten as ASCII {name: body}.
-    for m in (model, *model.get("models", {}).values()):
+    for m in devsmap.models(model):
         devsmap.write_json(os.path.join(in_dir, os.path.basename(m["path"])),
                            {m["name"]: m["body"]})
 
